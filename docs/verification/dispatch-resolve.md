@@ -98,6 +98,33 @@ The delivery mode is the same on most ship briefs and says nothing about difficu
 These live runs cover the scout line, the free-form whole-brief fallback, the ship-brief package, the top-tier floor turning the pick `ambiguous`, and the fallback to a runner-up.
 The remaining behavior is covered only by the offline tests below: a fenced heading inside a section, the boundaries of the global 0.6 confidence check with no declared floors, the probability-based floor examples, the tie case, and rejection of an out-of-range `min_confidence`.
 
+## The classifier with the options left open
+
+Run 2026-09-28 against `jev-latest` (answering as `jev-1.13.0`).
+
+**The defect this fix removes.** On this machine `quota-axi --json` exits 1 while writing a complete, schema-valid schema-5 snapshot of ten providers.
+Eight of the ten carry `state.status` `auth_required` (Claude's is `keychain_prompt_required`) and two carry `unavailable`; nine report `quotaSemantics.status` `unknown` and one `partial`.
+`fm_quota_json_valid` accepts that payload, because a provider whose authentication is unmodelled is disclosed uncertainty rather than a malformed row.
+Because the resolver judged the exit code, every resolution on this machine returned `status: error` with reason `quota-axi --json failed`, even though the model call preceding it had already returned 200 with a valid Choice answer - the ordering is the evidence.
+After the fix, the same brief and the same rules return a real result: the rule matched at probability 1.0 and confidence 0.99, and the candidate was listed as `eligible, unranked: provider claude unmeasured (unknown): disclosed uncertainty`, so the outcome is `escalate` on honest evidence rather than `error` on a discarded snapshot.
+
+**Triage calibration.** Eight flower-studio issues already triaged by hand, one call per issue answering both a five-way triage-label question and a three-way blast-radius question.
+
+| Measure | Result |
+| --- | --- |
+| Latency per call | about 1 s |
+| Input tokens per call | about 700 |
+| Matched the hand verdict | 4 of 8, all at confidence 0.88 or above |
+| Disagreed at high confidence | 1 (issue 583, 0.98) |
+| Disagreed below any sensible floor | 3 (0.55, 0.55, 0.37) |
+| Wrong automatic decisions at a 0.6 floor | 0 |
+
+The one high-confidence disagreement was the model being right and the hand pass wrong: it called issue 583 `ready-for-human` where the hand pass said `ready-for-agent`, and 583 did turn into a question only the owner could answer.
+This is a sample of eight on one repository; it is the reason for the 0.6 default, not a bound on the next issue.
+`bin/fm-classify-jev.sh --preset triage` carries the criteria wording this run was measured with, so changing that wording invalidates this table.
+
+A live smoke run of the shipped tool on one synthetic issue answered `ready-for-agent` at confidence 0.99 in 1,000 ms on 549 input tokens.
+
 ## Offline behavior
 
 `tests/fm-dispatch-resolve.test.sh` drives the public interface with a fake `curl` that records argv, the request body, the header read from file descriptor 3, and whether the secret reached its environment, plus a fake `quota-axi` that performs the same environment check.
@@ -109,11 +136,15 @@ It proves the key is absent from child environments, never appears on `curl` arg
 It proves the request uses the fixed endpoint and model, carries only the project, the brief's task sections read by the shared brief-heading parser with a scout line only for a scout brief and never a ship brief's delivery mode (or the whole brief when it has neither section), and rule Choice with one option per rule plus the fixed neutral none option, and never carries `why`, `use`, or quota.
 It proves a declared `min_confidence` is checked against the rule's own probability both as the pick and as a runner-up, a picked rule below it falls to the most probable runner-up that clears its floor, is `ambiguous` when none does or two tie, and that a file without declared floors keeps the global 0.6 floor on confidence unchanged.
 It proves the clear, fixed-floor ambiguous with candidate evidence, escalate (approval with candidate evidence, unverifiable rule floor, tie, nothing rankable), known rule-floor fall-through, known and unverifiable profile-floor evidence, explicit-provider and provider-ID enforcement, authoritative Agy and explicit-provider Gemini routing, partial providers, eligible unranked candidates and their clear-result note, concrete quota vetoes and profile-floor shortfalls taking precedence over uncertainty, account-wide quota veto, limiting-bound ranking, schema-6 account-row binding with schema-5 compatibility, missing-curl and quota-axi failures, HTTP 429 and 500, transport failure, malformed usage, zero-mass or malformed probabilities or confidence, malformed or duplicate profile, invalid selector, removed-option rejection, and out-of-range rule ID paths behave as the contract states, with configuration errors exiting 2 before any network call.
+It proves a `quota-axi` that exits non-zero while writing a usable snapshot still resolves, with the unmeasured provider listed as an eligible unranked candidate, while an unusable payload remains an error named `quota-axi --json failed` after a non-zero exit and `quota-axi --json returned an invalid snapshot` after a clean one.
+`tests/fm-classify-jev.test.sh` drives the open-question classifier through the same fake-`curl` shape: the absent key makes no call, the `.env` key activates it and the environment wins, the key is absent from child environments and never on argv, one request carries every declared question, each answer is printed with its choice, confidence, full probabilities, and its own floor verdict, the floor is inclusive and `--floor` moves it, the triage preset offers the canonical five labels and is what the request carries verbatim, `--state -` and `--questions -` read stdin and only one of them may, the never-send list withholds the request without printing the listed value, missing `curl`, a non-200, and a transport failure are error outcomes that exit 0, every declared question must come back as a well-formed Choice answer over its own options, and malformed or missing input exits 2 before any network call.
 `tests/fm-bootstrap.test.sh` proves bootstrap ignores resolver-only fields without the typed key, validates each malformed shape when the environment or home `.env` activates typed resolution, and prevents an environment-provided key from reaching child processes.
 
 ```console
 $ bash tests/fm-dispatch-resolve.test.sh | tail -1
 # all fm-dispatch-resolve tests passed
+$ bash tests/fm-classify-jev.test.sh | tail -1
+# all fm-classify-jev tests passed
 ```
 
 A live run needs a key and is not part of the suite; rerun the table above by pointing the tool at a brief with the key injected for that one command.

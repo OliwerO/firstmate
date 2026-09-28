@@ -1162,6 +1162,11 @@ The [shared quota library](../bin/fm-quota-axi-lib.sh) accepts schema 5 and sche
 
 - An expanded provider with no matching account row leaves the candidate eligible but unranked.
 - Known applicable rows from a provider with partial quota semantics remain rankable; rows whose own status is not known remain unrankable.
+- The snapshot is judged by its own contents, not by `quota-axi`'s exit code.
+  `quota-axi` exits non-zero while still writing a complete, schema-valid snapshot when a provider it polled reports `auth_required`, and discarding that snapshot would return `error` for every resolution on the machine.
+  A provider whose authentication is unmodelled is disclosed uncertainty that keeps a candidate eligible, so it surfaces as one unmeasured, unranked candidate rather than removing the candidate or killing the resolution.
+  Only an unusable payload fails, and it is still named `quota-axi --json failed` when `quota-axi` also exited non-zero, or `quota-axi --json returned an invalid snapshot` when it did not.
+  Nothing here prompts for a credential or touches the keychain.
 
 **Confidence and fallback rules**
 
@@ -1210,6 +1215,63 @@ Firstmate passes its profile line unless it states a reason to override, such as
 - The resolver fixes the endpoint at `https://api.typesafe.ai`, model at `jev-latest`, default confidence floor at 0.6, and request timeout at 5 seconds; `TYPESAFE_API_KEY` is its only resolver-specific environment setting.
 
 The live rule-match evidence is recorded in [`verification/dispatch-resolve.md`](verification/dispatch-resolve.md).
+
+### The same classifier with the options left open (bin/fm-classify-jev.sh)
+
+Dispatch resolution is one Choice question whose options are the configured rules.
+Triage is one Choice question whose options are the canonical triage labels.
+They are the same operation, so `bin/fm-classify-jev.sh` is the resolver's classifier with the question set left open, and [`bin/fm-jev-lib.sh`](../bin/fm-jev-lib.sh) is the one call path both tools use: the opt-in key lookup, the never-send guard, the POST that keeps the key off argv, and the Choice-answer validation.
+
+The opt-in gate, key handling, never-send list, and "every outcome exits 0" contract are the resolver's, unchanged; `config/dispatch-never-send` covers both tools.
+The tool stops at the answer.
+It publishes each question's choice, confidence, and full probabilities, and says whether the answer cleared the floor; it never applies a label, edits an issue, or dispatches anything.
+
+```sh
+bin/fm-classify-jev.sh --state issue.json --preset triage            # TOON block on stdout
+bin/fm-classify-jev.sh --state issue.json --questions questions.json --floor 0.8
+bin/fm-classify-jev.sh --print-preset triage                         # the preset's exact JSON
+```
+
+`--state` is a JSON value sent verbatim as the request's `state`; `--questions` is a JSON object of question-name to `{type: "choice", instructions, criteria}`, where each criterion says the condition under which that option is right.
+Either may be `-` to read stdin, but only one of them.
+Several questions ride one call and are answered in one round trip.
+
+**The triage preset**
+
+`--preset triage` asks one question, `label`, over the canonical five triage roles - `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix` - each with the condition under which it is right.
+The roles and their meanings come from the triage-label doc resolution order: a repo's own `docs/agents/triage-labels.md` first, the personal agent-docs default when the repo has none.
+A repo whose tracker uses different label strings passes its own `--questions` file instead; `--print-preset triage` prints the built-in set to start from.
+
+**The confidence floor is a routing device, not a correctness guarantee**
+
+The floor defaults to 0.6, the resolver's floor.
+At or above it the answer is taken; below it the answer is `ambiguous` and the decision belongs to a stronger model or a person.
+Neither outcome is a claim that the model is right.
+
+The floor was chosen from measurement, not assumption.
+Against eight flower-studio issues already triaged by hand, one call answering both a five-way triage-label question and a three-way blast-radius question took about one second and roughly 700 input tokens.
+Four of the eight matched the hand verdict, every one of them at confidence 0.88 or above.
+One disagreed at 0.98 confidence, issue 583, and the model was right where the hand pass was wrong: it called it `ready-for-human`, the hand pass called it `ready-for-agent`, and 583 did in fact turn into a question only the owner could answer.
+The three remaining disagreements came in at 0.55, 0.55, and 0.37, below any sensible floor.
+On that sample the floor produced no wrong automatic decision, which is what it is for: separating the answers worth taking from the answers worth escalating.
+It is a sample of eight on one repository, so it bounds nothing; it is the reason for the default, not a guarantee about the next issue.
+
+The preset's criteria wording is the wording that measurement was taken with, so changing it invalidates the calibration above.
+
+**Outcomes and exit status**
+
+| Result | Meaning |
+| --- | --- |
+| `clear` | Every answer is at or above the floor. |
+| `ambiguous` | At least one answer is below the floor; each answer carries its own verdict. |
+| `error` | API, network, or malformed-response failure. |
+
+Every result above exits 0.
+Only a usage or configuration error exits 2: unreadable or non-JSON input, a malformed question set, a floor outside 0 through 1, or missing `jq`.
+
+No triage skill or drain calls this tool automatically; a caller invokes it and reads the block.
+
+The calibration run and the offline coverage are recorded in [`verification/dispatch-resolve.md`](verification/dispatch-resolve.md).
 
 ## Toolchain
 
@@ -2320,7 +2382,7 @@ FMX_RELAY_URL=https://myfirstmate.io   # optional Relay endpoint override, mainl
 FMX_ENV_FILE=           # optional alternate .env file for direct Relay client invocations; bootstrap still checks $FM_HOME/.env
 FMX_DRY_RUN=            # truthy previews Relay replies and dismissals to state/x-outbox/ without posting or requiring a token
 FMX_X_REPLY_MAX_CHARS=280   # X reply per-message split budget; values below 50 clamp to 50
-TYPESAFE_API_KEY=       # typed dispatch resolution opt-in, from the environment or .env; absent means bin/fm-dispatch-resolve.sh is off (docs/configuration.md "Typed dispatch resolution")
+TYPESAFE_API_KEY=       # typed dispatch resolution and classification opt-in, from the environment or .env; absent means bin/fm-dispatch-resolve.sh and bin/fm-classify-jev.sh are off (docs/configuration.md "Typed dispatch resolution")
 FMX_DISCORD_REPLY_MAX_CHARS=1900   # Discord reply per-message split budget; values below 50 clamp to 50, values above 2000 reset to 1900
 FMX_X_THREAD_MAX=25     # maximum messages in one auto-split reply thread
 FMX_FOLLOWUP_MAX_AGE_SECS=604800   # local window for posting Relay completion follow-ups (7 days)
