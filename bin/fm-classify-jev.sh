@@ -242,7 +242,9 @@ fm_jev_post "$REQUEST" "$RESP_FILE" "$TYPESAFE_API_KEY_PRIVATE"
 jq -e --slurpfile questions "$QUESTIONS" "$FM_JEV_ANSWER_JQ"'
   ($questions[0]) as $q | . as $root |
   ($root.answers | type) == "object" and
-  all($q | keys[]; . as $name | jev_answer_ok($root.answers[$name]; ($q[$name].criteria | keys))) and
+  all($q | keys[]; . as $name |
+    jev_answer_ok($root.answers[$name]; ($q[$name].criteria | keys)) and
+    (($q[$name].criteria | keys | index($root.answers[$name].choice)) != null)) and
   ($root | jev_usage_ok)' "$RESP_FILE" >/dev/null 2>&1 \
   || emit_error "response is not a Choice answer for every question"
 
