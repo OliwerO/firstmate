@@ -39,6 +39,7 @@ FM_JEV_ANSWER_JQ='
   def jev_answer_ok($a; $choices):
     ($a | type) == "object" and
     ($a.choice | type) == "string" and
+    ($choices | index([$a.choice])) != null and
     ($a.confidence | type) == "number" and
     $a.confidence >= 0 and $a.confidence <= 1 and
     ($a.probabilities | type) == "object" and
