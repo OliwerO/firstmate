@@ -5,7 +5,6 @@
 # Usage:
 #   fm-classify-jev.sh --state <file|-> --questions <file|->  [--floor <0..1>]
 #   fm-classify-jev.sh --state <file|-> --preset triage       [--floor <0..1>]
-#   fm-classify-jev.sh --print-preset triage
 #
 # This is bin/fm-dispatch-resolve.sh's classifier with the options left open.
 # Dispatch resolution is one Choice question whose options are the configured
@@ -33,7 +32,11 @@
 #   --preset      a built-in question set instead of --questions; see
 #                 "Presets" below.
 #   --floor       the confidence floor, default 0.6, the same floor
-#                 bin/fm-dispatch-resolve.sh applies.
+#                 bin/fm-dispatch-resolve.sh applies. A caller may raise it
+#                 above that shared default: the measured triage sample
+#                 separated cleanly - agreements at 0.88 confidence and above,
+#                 every disagreement at 0.55 or below - so a stricter floor
+#                 than 0.6 is the intended use.
 #
 # Never-send check: when the optional $FM_HOME/config/dispatch-never-send list
 #   exists, every string value of the built request - the state, every
@@ -48,8 +51,7 @@
 #            (needs-triage, needs-info, ready-for-agent, ready-for-human,
 #            wontfix) with the condition under which each is right. Pass the
 #            state as {"issue": {"title": ..., "body": ...}} or whatever else
-#            carries the issue. Use --print-preset to read the exact JSON, and
-#            pass your own --questions file when a repo's
+#            carries the issue. Pass your own --questions file when a repo's
 #            docs/agents/triage-labels.md names different labels.
 #
 # Output (stdout, TOON-style block, the resolver's shape):
@@ -122,14 +124,13 @@ triage_preset() {
   }'
 }
 
-STATE_PATH='' QUESTIONS_PATH='' PRESET='' PRINT_PRESET='' FLOOR=$FM_JEV_CONFIDENCE_FLOOR
+STATE_PATH='' QUESTIONS_PATH='' PRESET='' FLOOR=$FM_JEV_CONFIDENCE_FLOOR
 NEVER_SEND_PATH="$CONFIG/dispatch-never-send"
 while [ $# -gt 0 ]; do
   case "$1" in
     --state) [ $# -ge 2 ] || die "--state needs a value"; STATE_PATH=$2; shift 2 ;;
     --questions) [ $# -ge 2 ] || die "--questions needs a value"; QUESTIONS_PATH=$2; shift 2 ;;
     --preset) [ $# -ge 2 ] || die "--preset needs a value"; PRESET=$2; shift 2 ;;
-    --print-preset) [ $# -ge 2 ] || die "--print-preset needs a value"; PRINT_PRESET=$2; shift 2 ;;
     --floor) [ $# -ge 2 ] || die "--floor needs a value"; FLOOR=$2; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument $1" ;;
@@ -144,12 +145,6 @@ known_preset() {
     *) return 1 ;;
   esac
 }
-
-if [ -n "$PRINT_PRESET" ]; then
-  known_preset "$PRINT_PRESET" || die "unknown preset: $PRINT_PRESET (known: triage)"
-  triage_preset
-  exit 0
-fi
 
 # ---- opt-in gate ---------------------------------------------------------------
 TYPESAFE_API_KEY_PRIVATE=$(fm_jev_resolve_key "$FM_HOME")

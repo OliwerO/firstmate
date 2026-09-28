@@ -1229,7 +1229,6 @@ It publishes each question's choice, confidence, and full probabilities, and say
 ```sh
 bin/fm-classify-jev.sh --state issue.json --preset triage            # TOON block on stdout
 bin/fm-classify-jev.sh --state issue.json --questions questions.json --floor 0.8
-bin/fm-classify-jev.sh --print-preset triage                         # the preset's exact JSON
 ```
 
 `--state` is a JSON value sent verbatim as the request's `state`; `--questions` is a JSON object of question-name to `{type: "choice", instructions, criteria}`, where each criterion says the condition under which that option is right.
@@ -1240,7 +1239,7 @@ Several questions ride one call and are answered in one round trip.
 
 `--preset triage` asks one question, `label`, over the canonical five triage roles - `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix` - each with the condition under which it is right.
 The roles and their meanings come from the triage-label doc resolution order: a repo's own `docs/agents/triage-labels.md` first, the personal agent-docs default when the repo has none.
-A repo whose tracker uses different label strings passes its own `--questions` file instead; `--print-preset triage` prints the built-in set to start from.
+A repo whose tracker uses different label strings passes its own `--questions` file, declaring those labels as the options, instead of the preset.
 
 **The confidence floor is a routing device, not a correctness guarantee**
 

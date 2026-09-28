@@ -202,11 +202,6 @@ assert_contains "$out" '  status: clear' "confidence exactly at the floor is tak
 pass "the floor is inclusive: at the floor the answer is taken"
 
 # --- the triage preset ---------------------------------------------------------
-preset=$("$TOOL" --print-preset triage)
-assert_equals '["needs-info","needs-triage","ready-for-agent","ready-for-human","wontfix"]' \
-  "$(jq -c '.label.criteria | keys' <<<"$preset")" "the triage preset offers the canonical five labels"
-assert_equals 'choice' "$(jq -r '.label.type' <<<"$preset")" "the preset question is a Choice"
-assert_equals 'true' "$(jq -r '[.label.criteria[] | length > 0] | all' <<<"$preset")" "every label declares the condition under which it is right"
 PRESET_RESPONSE="$TMP_ROOT/preset-response.json"
 jq -n '{
   model: "jev-1.13.0",
@@ -220,12 +215,16 @@ TYPESAFE_API_KEY=$KEY FAKE_CURL_RESPONSE="$PRESET_RESPONSE" run code out err --s
 expect_code 0 "$code" "the preset path exits 0"
 assert_contains "$out" '  answer: label  choice: ready-for-human  confidence: 0.98  -> clear' "the preset answers the triage label question"
 assert_equals '["label"]' "$(jq -c '.questions | keys' <<<"$(cat "$LOG/body")")" "the preset asks exactly one question"
-assert_equals "$(jq -cS . <<<"$preset")" "$(jq -cS '.questions' <<<"$(cat "$LOG/body")")" "the request carries the printed preset verbatim"
+preset=$(jq -c '.questions' "$LOG/body")
+assert_equals '["needs-info","needs-triage","ready-for-agent","ready-for-human","wontfix"]' \
+  "$(jq -c '.label.criteria | keys' <<<"$preset")" "the triage preset offers the canonical five labels"
+assert_equals 'choice' "$(jq -r '.label.type' <<<"$preset")" "the preset question is a Choice"
+assert_equals 'true' "$(jq -r '[.label.criteria[] | length > 0] | all' <<<"$preset")" "every label declares the condition under which it is right"
 reset_log
 TYPESAFE_API_KEY=$KEY run code out err --state "$STATE" --preset triage --questions "$QUESTIONS"
 expect_code 2 "$code" "--preset with --questions is a usage error"
 assert_contains "$err" 'mutually exclusive' "the conflict is named"
-TYPESAFE_API_KEY=$KEY run code out err --print-preset nosuch
+TYPESAFE_API_KEY=$KEY run code out err --state "$STATE" --preset nosuch
 expect_code 2 "$code" "an unknown preset is a usage error"
 assert_contains "$err" 'unknown preset: nosuch' "the unknown preset is named"
 pass "the triage preset offers the canonical five labels and is what the request carries"
@@ -334,6 +333,7 @@ del(.answers.blast_radius)|a missing answer for a declared question
 .answers.label.probabilities["extra"] = 0.0|probabilities carrying an undeclared option
 .answers.label.probabilities["ready-for-agent"] = 0.2|probabilities that do not sum to one
 .answers.label.choice = 7|a non-string choice
+.answers.label.choice = "ready_for_agent"|a choice outside the declared options
 .usage.input_tokens = "many"|non-numeric usage
 CASES
 pass "every declared question must come back as a well-formed Choice answer over its own options"
