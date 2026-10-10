@@ -84,6 +84,11 @@ The model handles notifications but never routine re-arm.
 Unless `config/supervision-host-off` opts the home out, the hook foregrounds the supervision host instead, which also runs Claude's print mode as its headless engine; [`supervision-host.md`](../../../../../docs/supervision-host.md#engines) owns the verified engine facts.
 Claude's PreToolUse seatbelt blocks directly, and its deny is honored only with empty stdout; `../../../docs/arm-pretool-check.md` owns that contract.
 
+### Home script allow rules
+
+Every home's session start merges exact-script `permissions.allow` rules for its own scripts into the untracked home-local `.claude/settings.local.json`, so auto mode stops blocking them as self-modification; [`Home script permissions`](../../../../../docs/configuration.md#home-script-permissions-claudesettingslocaljson) owns the scope.
+On 2.1.296, `claude -p --permission-mode dontAsk` in a home holding those rules ran `bin/S`, `<root>/bin/S`, and `FM_HOME=<home> <root>/bin/S` for a granted script and denied the ungranted `bin/fm-pr-merge.sh`, confirming that the literal `FM_HOME=` prefix form matches.
+
 ### Delegation guard
 
 Claude delegation, scheduling, and worktree tools can create work without `state/<id>.meta`, making guards unable to count it.

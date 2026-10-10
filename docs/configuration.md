@@ -9,7 +9,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | --- | --- |
 | Firstmate's code, private files, or project location | [FM_HOME](#fm_home) and [operational home layout](#operational-home-layout-and-state) |
 | Task windows and worker tools | [Runtime backend](#runtime-backend-configbackend--fm_backend) and [harness support](#harness-support) |
-| Worker permissions, accounts, or environment | [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [worker account pin](#worker-account-pin-configclaude-account-configpi-account), and [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist) |
+| Worker permissions, accounts, or environment | [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [home script permissions](#home-script-permissions-claudesettingslocaljson), [worker account pin](#worker-account-pin-configclaude-account-configpi-account), and [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist) |
 | Backlog, preferences, and memory | [Backlog backend](#backlog-backend-taskstoml--configbacklog-backend), [captain preferences](#captain-preferences-datacaptainmd--datacaptain-sharedmd), and [startup memory budget](#startup-memory-budget-configstartup-memory-budget) |
 | Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), and [Calm preference](#calm-preference-configcalm) |
 | Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd) |
@@ -846,6 +846,19 @@ The diagnostic names the accepted values; Firstmate never falls back to a permis
 The file is a captain-wide safety preference, so it is inherited into secondmate homes under the [`secondmate-provisioning`](../.agents/skills/secondmate-provisioning/SKILL.md) inherited-local-material contract; a secondmate's own Claude crewmates then launch on the same posture.
 
 The [Claude adapter reference](../.agents/skills/harness-adapters/references/harness/claude.md) records the permission-mode observations and the distinct startup dialogs.
+
+## Home script permissions (.claude/settings.local.json)
+
+A Claude Code session running a Firstmate home in auto mode can have its own home scripts blocked by the classifier as self-modification, because scripts such as `bin/fm-spawn.sh` and `bin/fm-brief.sh` write agent configuration and instructions.
+Every non-detect-only session start therefore merges allow rules for that home's own operational scripts into the code root's gitignored `.claude/settings.local.json`, so no rule is written by hand.
+A matching narrow allow rule resolves before the classifier reviews a command, and Claude Code reloads the file into a running session.
+Because each home runs its own session start, the primary home and every local or remote secondmate home converge on their own scripts and paths.
+A session start whose `FM_HOME` names a directory other than the code root writes nothing, so a shared code root never collects another home's rules.
+
+The rules cover each executable `bin/fm-*.sh` in that home, invoked relatively, by absolute path, or with that home's `FM_HOME=` prefix.
+They never cover sourced libraries, another home, project clones, arbitrary commands, or the merge commands `bin/fm-pr-merge.sh` and `bin/fm-merge-local.sh`, which stay with the classifier or a permission prompt.
+Existing file content is preserved and rules are only ever added; a file that cannot be merged safely is left untouched and reported as a `CLAUDE_PERMISSIONS:` bootstrap line.
+The [`bin/fm-claude-permissions.sh` header](../bin/fm-claude-permissions.sh) owns the exact rule forms and merge refusals, and `bin/fm-claude-permissions.sh print` lists the rules for the current home.
 
 ## Worker account pin (config/claude-account, config/pi-account)
 
