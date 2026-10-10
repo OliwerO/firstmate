@@ -79,6 +79,17 @@ test_sync_creates_missing_file() {
   pass "sync creates or fills an absent or empty settings file"
 }
 
+test_sync_skips_a_home_outside_the_code_root() {
+  local root home
+  root="$TMP_ROOT/foreign/root"
+  home="$TMP_ROOT/foreign/home"
+  make_root "$root"
+  mkdir -p "$home"
+  run_tool "$root" "$home" sync || fail "sync exited nonzero for a separate home"
+  [ ! -e "$root/.claude/settings.local.json" ] || fail "sync wrote rules for a home outside the code root"
+  pass "sync leaves a code root alone when FM_HOME names another home"
+}
+
 test_sync_refuses_unsafe_files() {
   local root file out rc
   root="$TMP_ROOT/refuse/root"
@@ -131,5 +142,6 @@ test_unquotable_paths_skip_absolute_forms() {
 test_print_covers_only_home_scripts
 test_sync_merges_and_is_idempotent
 test_sync_creates_missing_file
+test_sync_skips_a_home_outside_the_code_root
 test_sync_refuses_unsafe_files
 test_unquotable_paths_skip_absolute_forms

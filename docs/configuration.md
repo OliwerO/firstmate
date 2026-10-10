@@ -853,6 +853,7 @@ A Claude Code session running a Firstmate home in auto mode can have its own hom
 Every non-detect-only session start therefore merges allow rules for that home's own operational scripts into the code root's gitignored `.claude/settings.local.json`, so no rule is written by hand.
 A matching narrow allow rule resolves before the classifier reviews a command, and Claude Code reloads the file into a running session.
 Because each home runs its own session start, the primary home and every local or remote secondmate home converge on their own scripts and paths.
+A session start whose `FM_HOME` names a directory other than the code root writes nothing, so a shared code root never collects another home's rules.
 
 The rules cover each executable `bin/fm-*.sh` in that home, invoked relatively, by absolute path, or with that home's `FM_HOME=` prefix.
 They never cover sourced libraries, another home, project clones, arbitrary commands, or the merge commands `bin/fm-pr-merge.sh` and `bin/fm-merge-local.sh`, which stay with the classifier or a permission prompt.

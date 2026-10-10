@@ -4,6 +4,8 @@
 # Usage: fm-claude-permissions.sh print|sync
 #   print  Print this home's Claude Code allow rules, one per line, sorted.
 #   sync   Merge those rules into <code-root>/.claude/settings.local.json.
+#          A no-op when FM_HOME resolves to a directory other than the code
+#          root, so a shared code root never collects another home's rules.
 #          Silent when the file already holds every rule; prints one
 #          "CLAUDE_PERMISSIONS: <reason>" line and exits 1 when it cannot merge.
 #
@@ -99,6 +101,8 @@ diag() {
 
 sync_rules() {
   local dir file rules tmp current merged
+  [ -d "$FM_HOME" ] || return 0
+  [ "$(cd "$FM_HOME" && pwd -P)" = "$(cd "$FM_ROOT" && pwd -P)" ] || return 0
   command -v jq >/dev/null 2>&1 || diag "jq is required to merge .claude/settings.local.json"
   dir="$FM_ROOT/.claude"
   file="$dir/settings.local.json"
