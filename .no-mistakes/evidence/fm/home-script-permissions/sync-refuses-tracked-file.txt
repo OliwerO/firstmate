@@ -1,0 +1,4 @@
+$ FM_HOME=/private/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob bin/fm-claude-permissions.sh sync   (file tracked by git)
+CLAUDE_PERMISSIONS: /private/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob/.claude/settings.local.json is tracked by git; not writing home-local rules into it
+rc=1
+file after: {}

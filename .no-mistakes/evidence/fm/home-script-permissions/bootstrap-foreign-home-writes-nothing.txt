@@ -1,0 +1,12 @@
+# code root: /var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob
+# FM_HOME (separate lab home): /var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab.IIbScE
+bootstrap rc=0
+CLAUDE_PERMISSIONS lines in bootstrap output: 0
+$ ls -a .claude
+.
+..
+mods
+settings.json
+skills
+settings.local.json in code root: absent
+settings.local.json anywhere in lab home:        0

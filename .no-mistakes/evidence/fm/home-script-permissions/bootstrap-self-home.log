@@ -1,0 +1,2 @@
+MISSING: tmux (install: brew install tmux  # or the platform's package manager)
+/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob/bin/fm-claude-permissions.sh: line 91: printf: write error: Interrupted system call

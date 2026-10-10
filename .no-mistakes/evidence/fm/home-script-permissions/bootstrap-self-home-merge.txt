@@ -1,0 +1,28 @@
+# before:
+{"permissions":{"allow":["Bash(make test)"],"deny":["Bash(rm -rf *)"]},"env":{"FOO":"bar"}}
+# bootstrap (FM_HOME == code root) rc=0
+# after: allow count=925 first="Bash(make test)" deny=["Bash(rm -rf *)"] env={"FOO":"bar"}
+# sample rules for the scripts from the incident:
+Bash(./bin/fm-brief.sh *)
+Bash(./bin/fm-spawn.sh *)
+Bash(./bin/fm-tasks-axi.sh *)
+Bash(/private/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob/bin/fm-brief.sh *)
+Bash(/private/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob/bin/fm-spawn.sh *)
+Bash(/private/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob/bin/fm-tasks-axi.sh *)
+Bash(/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob/bin/fm-brief.sh *)
+Bash(/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob/bin/fm-spawn.sh *)
+Bash(/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob/bin/fm-tasks-axi.sh *)
+Bash(FM_HOME=/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob /private/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob/bin/fm-brief.sh *)
+Bash(FM_HOME=/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob /private/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob/bin/fm-spawn.sh *)
+Bash(FM_HOME=/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob /private/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob/bin/fm-tasks-axi.sh *)
+Bash(FM_HOME=/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob /var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob/bin/fm-brief.sh *)
+Bash(FM_HOME=/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob /var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob/bin/fm-spawn.sh *)
+Bash(FM_HOME=/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob /var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob/bin/fm-tasks-axi.sh *)
+Bash(FM_HOME=/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob bin/fm-brief.sh *)
+Bash(FM_HOME=/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob bin/fm-spawn.sh *)
+Bash(FM_HOME=/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab-home-root.ovG2ob bin/fm-tasks-axi.sh *)
+Bash(bin/fm-brief.sh *)
+Bash(bin/fm-spawn.sh *)
+Bash(bin/fm-tasks-axi.sh *)
+# merge commands granted? 0
+# git status (file is gitignored):
