@@ -193,6 +193,7 @@ So a finished, hung, or identity-mismatched claim cannot suppress that recovery 
 The recovery-episode contract below owns once-per-generation announcement.
 A handling successor does not re-announce.
 It enters its poll loop immediately and keeps scanning signals, stale panes, and checks.
+Every watcher, successor or not, also wakes for a durable row another writer (such as a captain inbox note) queued after it armed, unless that row's kind and key were already queued at arm time; `procevent:*` rows stay with their own surfacing, and the check is off while afk is active (`queue_surface_appended` in `bin/fm-watch.sh`).
 
 ### Manual recovery and other harnesses
 
