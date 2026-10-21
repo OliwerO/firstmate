@@ -176,6 +176,15 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 mkdir -p "$STATE"
+# Arm-time boundary for queue_surface_appended, read at launch before the slow
+# library loading and startup work so a row another writer queues meanwhile
+# is still surfaced. Unlocked: a racing append can only lower the boundary,
+# which surfaces that row rather than hiding it.
+QUEUE_ARM_SEQ=$(cat "$STATE/.wake-queue.seq" 2>/dev/null || true)
+case "$QUEUE_ARM_SEQ" in ''|*[!0-9]*) QUEUE_ARM_SEQ=0 ;; esac
+QUEUE_ARM_SEQ=$(awk -F '\t' -v seq="$QUEUE_ARM_SEQ" 'BEGIN { max = seq + 0 }
+  NF >= 5 && $2 ~ /^[0-9]+$/ && $2 + 0 > max { max = $2 + 0 } END { print max }' \
+  "${FM_WAKE_QUEUE:-$STATE/.wake-queue}" 2>/dev/null || printf '%s\n' "$QUEUE_ARM_SEQ")
 # A home that never existed (a state-only test fixture) is not a home that
 # disappeared, so the per-poll home-gone exit below applies only when it did.
 WATCH_HOME_EXISTED=0
@@ -2100,14 +2109,10 @@ procevent_surface_queued() {
 # survive the reconcile republication that appends them again every cycle.
 # While afk is active the daemon owns triage and this check stays off.
 queue_arm_snapshot() {
-  local seq
   fm_lock_acquire_wait "$FM_WAKE_QUEUE_LOCK" || return 1
-  seq=$(cat "$STATE/.wake-queue.seq" 2>/dev/null || true)
-  case "$seq" in ''|*[!0-9]*) seq=0 ;; esac
-  QUEUE_ARM_SEQ=$(awk -F '\t' -v seq="$seq" 'BEGIN { max = seq + 0 }
-    NF >= 5 && $2 ~ /^[0-9]+$/ && $2 + 0 > max { max = $2 + 0 } END { print max }' \
-    "$FM_WAKE_QUEUE" 2>/dev/null || printf '%s\n' "$seq")
-  QUEUE_ARM_KEYS=$(awk -F '\t' 'NF >= 5 { print $3 "\t" $4 }' "$FM_WAKE_QUEUE" 2>/dev/null || true)
+  QUEUE_ARM_KEYS=$(awk -F '\t' -v arm="$QUEUE_ARM_SEQ" '
+    NF >= 5 && $2 ~ /^[0-9]+$/ && $2 + 0 <= arm + 0 { print $3 "\t" $4 }' \
+    "$FM_WAKE_QUEUE" 2>/dev/null || true)
   fm_lock_release "$FM_WAKE_QUEUE_LOCK"
 }
 
@@ -2682,7 +2687,7 @@ resurface_after_downtime() {
   wake "check: rearm-resurface"
 }
 
-# Arm-time boundary for queue_surface_appended.
+# Keys already queued at the launch-time boundary, for queue_surface_appended.
 queue_arm_snapshot || {
   echo "watcher: wake queue could not be snapshotted at arm time" >&2
   exit 1
