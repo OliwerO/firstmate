@@ -1,0 +1,19 @@
+## inbox note queued before launch (presented, awaiting ack), then captain answers while successor is parked
+$ fm-inbox.sh note 'earlier presented answer'
+queued 1792559766-Hs4nk9
+  earlier presented answer
+  firstmate will pick this up at its next check.
+$ FM_WATCH_HANDLING_SUCCESSOR=1 fm-watch.sh &   (07:16:16)
+after 45s: watcher 59845 still parked; stdout=''
+$ fm-inbox.sh note 'captain answered in the app'   (07:17:02)
+queued 1792559824-z0IkJ8
+  captain answered in the app
+  firstmate will pick this up at its next check.
+watcher exited rc=0 at 07:17:41 (16s after trigger)
+--- watcher stdout (wake line firstmate receives):
+check: 1 queued wake row(s) appended while parked: inbox:1792559824-z0IkJ8
+--- stderr:
+--- state/.wake-queue:
+1792559769	1	check	inbox:1792559766-Hs4nk9	check: captain inbox note 1792559766-Hs4nk9 - earlier presented answer
+1792559830	2	check	inbox:1792559824-z0IkJ8	check: captain inbox note 1792559824-z0IkJ8 - captain answered in the app
+(lab removed)

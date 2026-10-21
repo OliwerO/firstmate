@@ -1,0 +1,9 @@
+## row appended by another writer during a successor watcher's startup (before its first poll beacon)
+watcher pid 71794 started 06:56:11
+row appended 06:56:25; first beacon present yet? no
+first beacon at 06:56:43 (watcher now in its poll loop)
+RESULT: still parked 120s after the row was queued - row NOT surfaced; stopping
+--- stdout:
+--- queue:
+1792558577	1	check	inbox:race-1	check: captain inbox note race-1 - answered during watcher startup
+(lab removed)

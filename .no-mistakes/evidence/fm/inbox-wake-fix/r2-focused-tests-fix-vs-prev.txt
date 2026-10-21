@@ -1,0 +1,10 @@
+== target 0567a101 (launch-time boundary)
+ok - a captain inbox note queued while a cycle is parked wakes it; an unchanged queue does not
+ok - a captain inbox note queued during successor startup wakes it
+rc=
+== previous commit e3b780fd bin + new tests
+ok - a captain inbox note queued while a cycle is parked wakes it; an unchanged queue does not
+wait_for_exit: owned pid 20042 exceeded 300 polls; sending TERM
+20042  9885 S    bash /tmp/fmdrv2/prev/bin/fm-watch.sh
+not ok - a captain inbox note queued during successor startup did not wake it: 
+rc=

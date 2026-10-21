@@ -1,0 +1,11 @@
+## re-announcing a note that was already queued at arm time must not wake/loop
+$ FM_WATCH_HANDLING_SUCCESSOR=1 fm-watch.sh &   (06:55:06)
+after 8s: watcher pid 62073 still parked; stdout=''
+$ append same kind/key again (re-announce of still-queued inbox:1792558497-mHI70r)
+watcher still parked after 60s (no wake) - stopping it
+--- watcher stdout (wake line firstmate receives):
+--- stderr:
+--- state/.wake-queue:
+1792558501	1	check	inbox:1792558497-mHI70r	check: captain inbox note 1792558497-mHI70r - already queued answer
+1792558533	2	check	inbox:1792558497-mHI70r	check: captain inbox note 1792558497-mHI70r (re-announce)
+(lab removed)

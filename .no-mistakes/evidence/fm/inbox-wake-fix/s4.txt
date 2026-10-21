@@ -1,0 +1,10 @@
+## procevent:* rows appended by another writer stay with procevent owner (not surfaced by new check)
+$ FM_WATCH_HANDLING_SUCCESSOR=1 fm-watch.sh &   (07:04:35)
+after 8s: watcher pid 43566 still parked; stdout=''
+watcher exited rc=0 at 07:05:16
+--- watcher stdout (wake line firstmate receives):
+check: process-event result captured: procevent:fake-1
+--- stderr:
+--- state/.wake-queue:
+1792559092	1	check	procevent:fake-1	check: procevent fake
+(lab removed)

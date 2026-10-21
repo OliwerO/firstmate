@@ -1,0 +1,11 @@
+## ADVERSARIAL: queue lock held across launch so startup is pinned; another writer appends under that lock, then releases
+queue lock held (07:16:19); $ FM_WATCH_HANDLING_SUCCESSOR=1 fm-watch.sh &
+watcher took its watch lock after 7s; appending row and releasing queue lock (07:16:29)
+watcher exited rc=0 at 07:17:21 (28s after trigger)
+--- watcher stdout (wake line firstmate receives):
+check: 1 queued wake row(s) appended while parked: inbox:during-startup
+--- stderr:
+--- state/.wake-queue:
+1792559769	1	check	inbox:1792559767-uMnvK5	check: captain inbox note 1792559767-uMnvK5 - earlier presented answer
+1792559791	2	check	inbox:during-startup	check: captain inbox note during-startup - appended while successor started
+(lab removed)

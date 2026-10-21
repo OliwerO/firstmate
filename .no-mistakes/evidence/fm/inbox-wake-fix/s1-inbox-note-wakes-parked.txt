@@ -1,0 +1,15 @@
+## Scenario 1: parked successor cycle + captain inbox note
+$ fm-inbox.sh note 'earlier presented answer'   # queued BEFORE arm
+(eval):9: no such file or directory: env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS -u FM_ROOT_OVERRIDE -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE FM_HOME=/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T//fm-lab.MUxB9Z
+--- queue before arm:
+cat: /var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T//fm-lab.MUxB9Z/state/.wake-queue: No such file or directory
+$ FM_WATCH_HANDLING_SUCCESSOR=1 FM_POLL=1 fm-watch.sh &   (06:50:07)
+(eval):kill:14: kill 19279 failed: no such process
+$ fm-inbox.sh note 'captain answered in the app'   (06:50:13)
+(eval):16: no such file or directory: env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS -u FM_ROOT_OVERRIDE -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE FM_HOME=/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T//fm-lab.MUxB9Z
+watcher exited rc=127 at 06:50:14
+--- watcher stdout (wake reason delivered to firstmate):
+--- stderr:
+(eval):12: no such file or directory: env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS -u FM_ROOT_OVERRIDE -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE FM_HOME=/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T//fm-lab.MUxB9Z
+--- queue:
+cat: /var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T//fm-lab.MUxB9Z/state/.wake-queue: No such file or directory

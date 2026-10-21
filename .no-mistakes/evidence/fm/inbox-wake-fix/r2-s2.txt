@@ -1,0 +1,11 @@
+## re-announce of a row already queued at launch must not wake or loop
+$ FM_WATCH_HANDLING_SUCCESSOR=1 fm-watch.sh &   (07:16:16)
+after 45s: watcher still parked
+$ re-append same kind/key inbox:1792559766-swlk2h via fm_wake_append_locked (07:17:02)
+watcher STILL PARKED after 90s (no wake) - stopping it
+--- watcher stdout (wake line firstmate receives):
+--- stderr:
+--- state/.wake-queue:
+1792559769	1	check	inbox:1792559766-swlk2h	check: captain inbox note 1792559766-swlk2h - already queued answer
+1792559828	2	check	inbox:1792559766-swlk2h	check: captain inbox note (re-announce)
+(lab removed)

@@ -1,0 +1,14 @@
+## non-successor (fresh) arm also wakes on a parked-time inbox note
+$ FM_WATCH_HANDLING_SUCCESSOR=0 fm-watch.sh &   (07:05:17)
+after 5s: watcher pid 47591 still parked; stdout=''
+$ fm-inbox.sh note 'fresh-arm answer'
+queued 1792559123-3kfXcy
+  fresh-arm answer
+  firstmate will pick this up at its next check.
+watcher exited rc=0 at 07:05:57
+--- watcher stdout (wake line firstmate receives):
+check: rearm-resurface
+--- stderr:
+--- state/.wake-queue:
+1792559132	1	check	inbox:1792559123-3kfXcy	check: captain inbox note 1792559123-3kfXcy - fresh-arm answer
+(lab removed)

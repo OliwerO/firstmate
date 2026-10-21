@@ -1,0 +1,14 @@
+## ADVERSARIAL: note queued during successor STARTUP (after launch, before first poll beacon)
+$ FM_WATCH_HANDLING_SUCCESSOR=1 fm-watch.sh &   (07:16:16)
+$ fm-inbox.sh note 'answered during watcher startup' (07:16:19); watch lock pid present yet? no; beacon? 
+queued 1792559781-xhHzEp
+  answered during watcher startup
+  firstmate will pick this up at its next check.
+watcher exited rc=0 at 07:17:24 (32s after trigger)
+--- watcher stdout (wake line firstmate receives):
+check: 1 queued wake row(s) appended while parked: inbox:1792559781-xhHzEp
+--- stderr:
+--- state/.wake-queue:
+1792559769	1	check	inbox:1792559766-B2CZ3m	check: captain inbox note 1792559766-B2CZ3m - earlier presented answer
+1792559787	2	check	inbox:1792559781-xhHzEp	check: captain inbox note 1792559781-xhHzEp - answered during watcher startup
+(lab removed)

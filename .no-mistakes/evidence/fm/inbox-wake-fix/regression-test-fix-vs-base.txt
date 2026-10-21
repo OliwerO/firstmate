@@ -1,0 +1,8 @@
+== with fix (e3b780fd)
+ok - a captain inbox note queued while a cycle is parked wakes it; an unchanged queue does not
+rc=0
+== base bin (f685b114) + new test
+wait_for_exit: owned pid 80883 exceeded 300 polls; sending TERM
+80883 79973 S    bash /tmp/fmdrv/basewt/bin/fm-watch.sh
+not ok - a captain inbox note queued while the cycle was parked did not wake it: 
+rc=1

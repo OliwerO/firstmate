@@ -1,0 +1,13 @@
+## afk active: daemon owns triage, the new check stays off
+$ FM_WATCH_HANDLING_SUCCESSOR=1 fm-watch.sh &   (07:00:11)
+after 8s: watcher pid 14473 still parked; stdout=''
+$ fm-inbox.sh note 'answer while afk'
+queued 1792558821-wPYVSE
+  answer while afk
+  firstmate will pick this up at its next check.
+watcher still parked after 60s (no wake) - stopping it
+--- watcher stdout (wake line firstmate receives):
+--- stderr:
+--- state/.wake-queue:
+1792558826	1	check	inbox:1792558821-wPYVSE	check: captain inbox note 1792558821-wPYVSE - answer while afk
+(lab removed)
