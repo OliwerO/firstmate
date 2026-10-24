@@ -103,6 +103,12 @@
 #                          source owned closes that episode); the queued
 #                          payload names what to check. These three kinds are
 #                          joined with `;` when more than one surfaces in a cycle
+#   check: <n> queued wake row(s) appended while parked: <keys>
+#                          another writer (a captain inbox note, mail, a merge
+#                          outcome, ...) queued a row after this cycle armed whose
+#                          kind and key were not already queued then; procevent:*
+#                          keys stay with the lines above, and while afk is
+#                          active this stays off (queue_surface_appended)
 #   check: rejected unauthenticated state checks: <paths>
 #                          unsafe state checks were refused without execution
 #   check: rejected unauthenticated PR poll retirement receipts: <paths>
@@ -170,6 +176,15 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 mkdir -p "$STATE"
+# Arm-time boundary for queue_surface_appended, read at launch before the slow
+# library loading and startup work so a row another writer queues meanwhile
+# is still surfaced. Unlocked: a racing append can only lower the boundary,
+# which surfaces that row rather than hiding it.
+QUEUE_ARM_SEQ=$(cat "$STATE/.wake-queue.seq" 2>/dev/null || true)
+case "$QUEUE_ARM_SEQ" in ''|*[!0-9]*) QUEUE_ARM_SEQ=0 ;; esac
+QUEUE_ARM_SEQ=$(awk -F '\t' -v seq="$QUEUE_ARM_SEQ" 'BEGIN { max = seq + 0 }
+  NF >= 5 && $2 ~ /^[0-9]+$/ && $2 + 0 > max { max = $2 + 0 } END { print max }' \
+  "${FM_WAKE_QUEUE:-$STATE/.wake-queue}" 2>/dev/null || printf '%s\n' "$QUEUE_ARM_SEQ")
 # A home that never existed (a state-only test fixture) is not a home that
 # disappeared, so the per-poll home-gone exit below applies only when it did.
 WATCH_HOME_EXISTED=0
@@ -2078,6 +2093,53 @@ procevent_surface_queued() {
   wake "$reason"
 }
 
+# Deliver durable wake rows another writer appended while this cycle is parked.
+# Every row this watcher queues is followed by its own exit, so a row that
+# arrived after arm time came from someone else - a captain inbox note from
+# bin/fm-inbox.sh, mail, a merge outcome, a startup-network result - and it
+# would otherwise wait for some unrelated event to end the cycle. That matters
+# most in a handling successor, which skips resurface_after_downtime.
+# Arm time is the boundary: rows already queued then are presented by a drain
+# and awaiting acknowledgement, covered by the predecessor's delivered wake, or
+# owned by the downtime recovery above, so none of them is surfaced again here.
+# A later row is new only when its kind and key were not already queued at arm
+# time, the same identity the drain deduplicates on, so a writer re-announcing a
+# still-queued wake cannot loop.
+# procevent:* keys stay with procevent_surface_queued, whose per-key markers
+# survive the reconcile republication that appends them again every cycle.
+# While afk is active the daemon owns triage and this check stays off.
+queue_arm_snapshot() {
+  fm_lock_acquire_wait "$FM_WAKE_QUEUE_LOCK" || return 1
+  QUEUE_ARM_KEYS=$(awk -F '\t' -v arm="$QUEUE_ARM_SEQ" '
+    NF >= 5 && $2 ~ /^[0-9]+$/ && $2 + 0 <= arm + 0 { print $3 "\t" $4 }' \
+    "$FM_WAKE_QUEUE" 2>/dev/null || true)
+  fm_lock_release "$FM_WAKE_QUEUE_LOCK"
+}
+
+queue_surface_appended() {
+  local keys count
+  afk_present && return 0
+  [ -s "$FM_WAKE_QUEUE" ] || return 0
+  fm_lock_acquire_wait "$FM_WAKE_QUEUE_LOCK" || return 1
+  keys=$(QUEUE_ARM_KEYS=$QUEUE_ARM_KEYS awk -F '\t' -v arm="$QUEUE_ARM_SEQ" '
+    BEGIN {
+      n = split(ENVIRON["QUEUE_ARM_KEYS"], armed, "\n")
+      for (i = 1; i <= n; i++) if (armed[i] != "") known[armed[i]] = 1
+    }
+    NF >= 5 && $2 ~ /^[0-9]+$/ && $2 + 0 > arm + 0 {
+      if ($3 == "check" && $4 ~ /^procevent:/) next
+      id = $3 "\t" $4
+      if (id in known) next
+      known[id] = 1
+      print $4
+    }' "$FM_WAKE_QUEUE" 2>/dev/null || true)
+  fm_lock_release "$FM_WAKE_QUEUE_LOCK"
+  [ -n "$keys" ] || return 0
+  count=$(printf '%s\n' "$keys" | awk 'END { print NR }')
+  keys=$(printf '%s\n' "$keys" | awk 'NR <= 5 { printf " %s", $0 } END { if (NR > 5) printf " (+%d more)", NR - 5 }')
+  wake "check: $count queued wake row(s) appended while parked:$keys"
+}
+
 run_check_process() {
   local c=$1
   shift
@@ -2625,6 +2687,12 @@ resurface_after_downtime() {
   wake "check: rearm-resurface"
 }
 
+# Keys already queued at the launch-time boundary, for queue_surface_appended.
+queue_arm_snapshot || {
+  echo "watcher: wake queue could not be snapshotted at arm time" >&2
+  exit 1
+}
+
 while :; do
   # Home-gone exit: a deleted home, state directory, or code root means this
   # watcher's world is gone (a torn-down temporary home or a discarded
@@ -2716,6 +2784,13 @@ while :; do
   # A process-event result carries richer adapter-owned wake context than the
   # generic recovery reason, so give that owner first refusal.
   resurface_after_downtime
+
+  # Any other row a separate writer queued since arm time, such as a captain
+  # inbox note, ends the cycle now instead of waiting for an unrelated event.
+  queue_surface_appended || {
+    echo "watcher: wake queue observation failed" >&2
+    exit 1
+  }
 
   # The existing poll loop also owns the bounded inactive-outcome cadence.
   # This is mechanical and silent unless a durable terminal-outcome obligation

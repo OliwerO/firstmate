@@ -6129,6 +6129,85 @@ test_procevent_marker_failure_exits_and_replays() {
   pass "marker failure exits through the shared wake owner, releases its lock, and replays later"
 }
 
+# --- rows another writer queues while a cycle is parked ---------------------
+
+# A handling successor skips downtime resurfacing, so before the queue check a
+# captain inbox note captured while it was parked waited for an unrelated wake.
+# The row already queued at arm time stands for one a drain presented and is
+# still awaiting acknowledgement: it must not end the cycle on its own.
+test_inbox_note_wakes_parked_successor_cycle() {
+  local dir state fakebin out pid note
+  dir=$(make_case inbox-note-wakes-parked); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"
+  append_wake "$state" check "inbox:presented" "check: captain inbox note presented - earlier"
+  watch_bg "$state" "$fakebin" "$out" env FM_WATCH_HANDLING_SUCCESSOR=1
+  pid=$!
+  wait_poll_cycle "$state" "$pid" \
+    || fail "an unchanged queue ended the parked cycle: $(cat "$out")"
+  [ ! -s "$out" ] || fail "an unchanged queue printed a wake: $(cat "$out")"
+
+  FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$dir/data" \
+    FM_CONFIG_OVERRIDE="$dir/config" "$ROOT/bin/fm-inbox.sh" note "captain answered in the app" >/dev/null \
+    || fail "fm-inbox.sh could not capture the note"
+  note=$(find "$state/inbox" -maxdepth 1 -name '*.note' -type f | sed 's|.*/||; s|\.note$||')
+  [ -n "$note" ] || fail "the captured note left no record"
+  wait_for_exit "$pid" 300 \
+    || fail "a captain inbox note queued while the cycle was parked did not wake it: $(cat "$out")"
+  grep -F "check:" "$out" | grep -F "inbox:$note" >/dev/null \
+    || fail "the wake did not name the captured note: $(cat "$out")"
+  ! grep -F "inbox:presented" "$out" >/dev/null \
+    || fail "a row queued before arm time was surfaced again: $(cat "$out")"
+  pass "a captain inbox note queued while a cycle is parked wakes it; an unchanged queue does not"
+}
+
+# A row queued during a handling successor's startup, after launch but before
+# its first poll, is just as unseen as one queued while it is parked. Holding
+# the queue lock pins startup at that point while another writer appends.
+test_inbox_note_during_successor_startup_wakes_it() {
+  local dir state fakebin out pid holder i
+  dir=$(make_case inbox-note-during-startup); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"
+  append_wake "$state" check "inbox:presented" "check: captain inbox note presented - earlier"
+  FM_STATE_OVERRIDE="$state" bash -c '
+    . "$1" || exit 1
+    fm_lock_acquire_wait_max "$FM_WAKE_QUEUE_LOCK" 5 || exit 1
+    : > "$2"
+    i=0
+    while [ ! -e "$3" ] && [ "$i" -lt 600 ]; do
+      sleep 0.1
+      i=$((i + 1))
+    done
+    fm_wake_append_locked check "inbox:during-startup" "check: captain inbox note - during startup"
+    fm_lock_release "$FM_WAKE_QUEUE_LOCK"
+  ' _ "$ROOT/bin/fm-wake-lib.sh" "$dir/queue-lock-held" "$dir/release-queue-lock" &
+  holder=$!
+  i=0
+  while [ ! -e "$dir/queue-lock-held" ] && [ "$i" -lt 100 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  [ -e "$dir/queue-lock-held" ] || fail "the queue lock holder never took the lock"
+  watch_bg "$state" "$fakebin" "$out" env FM_WATCH_HANDLING_SUCCESSOR=1
+  pid=$!
+  i=0
+  while [ ! -s "$state/.watch.lock/pid" ] && [ "$i" -lt 300 ]; do
+    kill -0 "$pid" 2>/dev/null || fail "the successor exited during startup: $(cat "$out")"
+    sleep 0.1
+    i=$((i + 1))
+  done
+  : > "$dir/release-queue-lock"
+  wait "$holder" || fail "the queue lock holder could not append its row"
+  if ! wait_for_exit "$pid" 300; then
+    reap "$pid"
+    fail "a captain inbox note queued during successor startup did not wake it: $(cat "$out")"
+  fi
+  grep -F "check:" "$out" | grep -F "inbox:during-startup" >/dev/null \
+    || fail "the wake did not name the note queued during startup: $(cat "$out")"
+  ! grep -F "inbox:presented" "$out" >/dev/null \
+    || fail "a row queued before launch was surfaced again: $(cat "$out")"
+  pass "a captain inbox note queued during successor startup wakes it"
+}
+
 # --- heartbeat: no-change absorbed, backstop surfaces a missed status --------
 
 test_heartbeat_no_change_absorbed() {
@@ -6736,6 +6815,8 @@ test_procevent_launch_failed_episodes_are_each_delivered
 test_procevent_surface_serializes_with_drain
 test_procevent_surface_crash_boundaries
 test_procevent_marker_failure_exits_and_replays
+test_inbox_note_wakes_parked_successor_cycle
+test_inbox_note_during_successor_startup_wakes_it
 test_heartbeat_no_change_absorbed
 test_heartbeat_backstop_surfaces_unsurfaced_status
 test_heartbeat_backstop_surfaces_a_masked_status
