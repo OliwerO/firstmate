@@ -1,0 +1,41 @@
+== test_relaunch_keeps_an_armed_merge_watch_authenticated (base-commit fm-spawn.sh, new test)
+exit=1
+not ok - the merge watch must still authenticate after the relaunch
+window=fmses:fm-rl31
+endpoint_task_id=rl31
+worktree=/private/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-control-relaunch.AZK7QY/merge-watch-off-19983/wt
+project=/private/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-control-relaunch.AZK7QY/merge-watch-off-19983/proj
+harness=claude
+kind=ship
+mode=no-mistakes
+yolo=off
+branch=fm/rl31
+tasktmp=/tmp/fm-rl31
+model=default
+effort=default
+busy_gen=g1793563528.12086.28581
+spawn_gen=s1793563545.6859.23574
+pr=https://github.com/example/repo/pull/31
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=95615.20261101T200458Z.32413
+== test_traced_relaunch_keeps_an_armed_merge_watch_authenticated (base-commit fm-spawn.sh, new test)
+exit=1
+not ok - the merge watch must still authenticate after the relaunch
+window=fmses:fm-rl91
+endpoint_task_id=rl91
+worktree=/private/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-control-relaunch.M7M0tu/merge-watch-on-23928/wt
+project=/private/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-control-relaunch.M7M0tu/merge-watch-on-23928/proj
+harness=claude
+kind=ship
+mode=no-mistakes
+yolo=off
+branch=fm/rl91
+tasktmp=/tmp/fm-rl91
+model=default
+effort=default
+busy_gen=g1793563683.37938.14932
+spawn_gen=s1793563696.34891.17926
+pr=https://github.com/example/repo/pull/31
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=30637.20261101T200737Z.31320
+traceparent=00-647090e304a3e7a62ab5593d36ae2969-324cf74dd7975827-01

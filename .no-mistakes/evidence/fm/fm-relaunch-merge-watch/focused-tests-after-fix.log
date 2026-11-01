@@ -1,0 +1,6 @@
+ok - fm-control removes the dialog file after exit and after relaunch
+ok - fm-control exit removes the dialog file before it releases the control lock
+ok - fm-control relaunch: an armed merge watch stays authenticated across a relaunch
+ok - fm-control relaunch: an armed merge watch stays authenticated across a traced relaunch
+ok - fm-control relaunch: durable task metadata survives replacement launch publication
+ok - fm-control relaunch: disabling tracing clears metadata and pane context

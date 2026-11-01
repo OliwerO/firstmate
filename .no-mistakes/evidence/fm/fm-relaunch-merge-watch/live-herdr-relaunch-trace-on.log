@@ -1,0 +1,33 @@
+# session=fm-lab-prwatchon-80427-26544 lab=/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T//fm-lab.wGI0jm id=lw5646on trace=on head=d2251079
+## spawn real claude worker
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T//fm-lab.wGI0jm
+warning: herdr presentation parent is absent or ambiguous; using the ordinary flat layout without projection
+spawned lw5646on harness=claude kind=ship mode=local-only yolo=on window=fm-lab-prwatchon-80427-26544:w1:p2 worktree=/Users/oli_mac_mini/.treehouse/notes-c552a5/1/notes
+## worker status after spawn:
+paused [at=1793564005]: parked for lab; no code changes in scope, waiting on firstmate
+## simulate the PR having opened: record pr=/pr_head= and arm the merge watch
+## before relaunch:
+merge-watch: AUTHENTICATED url=https://github.com/example/notes/pull/7
+## fm-control relaunch (real claude, herdr lab)
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+relaunched lw5646on harness=claude from=claude model=haiku effort=low backend=herdr endpoint=fm-lab-prwatchon-80427-26544:w1:p2 worktree=/Users/oli_mac_mini/.treehouse/notes-c552a5/1/notes
+relaunch exit=0
+## task record after relaunch (key order):
+window endpoint_task_id worktree project harness kind mode yolo branch tasktmp model effort busy_gen spawn_gen backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id control_relaunch_tx traceparent pr pr_head 
+control_relaunch_tx=966.20261101T201438Z.19835
+traceparent=00-22f9cfdbab9490617ca4c764af0cb067-1e1645f7190e1fca-01
+pr=https://github.com/example/notes/pull/7
+pr_head=0123456789abcdef0123456789abcdef01234567
+## after relaunch:
+merge-watch: AUTHENTICATED url=https://github.com/example/notes/pull/7
+## live pane agent:
+{"id":"cli:pane:list","result":{"panes":[{"agent":"claude","agent_status":"idle","cwd":"/private/var/folders/wj/rgpcrhwx3f105d8xmn3z8xlc0000gn/T/fm-lab.wGI0jm/projects/notes","focused":true,"foreground_cwd":"/Users/oli_mac_mini/.treehouse/notes-c552a5/1/notes","pane_id":"w1:p2","revision":5,"scroll":{"max_offset_from_bottom":0,"offset_from_bottom":0,"viewport_rows":40},"tab_id":"w1:t2","terminal_id":"term_65f3ca4ae05832","terminal_title":"✳ Firstmate operational inbox input","terminal_title_stripped":"Firstmate operational inbox input","workspace_id":"w1"}],"type":"pane_list"}}
+RESULT: PASS
+# teardown
+# removed lab treehouse pool /Users/oli_mac_mini/.treehouse/notes-c552a5
