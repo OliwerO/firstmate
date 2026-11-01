@@ -27,6 +27,8 @@ set -u
 . "$ROOT/bin/fm-trace-context-lib.sh"
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-tasks-axi-lib.sh"
+# shellcheck source=/dev/null
+. "$ROOT/bin/fm-pr-lib.sh"
 
 CONTROL="$ROOT/bin/fm-control.sh"
 SPAWN="$ROOT/bin/fm-spawn.sh"
@@ -488,6 +490,37 @@ test_relaunch_preserves_durable_task_metadata() {
   [ "$(meta_field "$dir" rl19 decisions_reviewed)" = 1 ] \
     || fail "the task decision state must survive relaunch"
   pass "fm-control relaunch: durable task metadata survives replacement launch publication"
+}
+
+# A relaunch of a worker whose PR is open must keep its merge watch armed: the
+# watcher authenticates the poll against the task record on every check, so a
+# record the PR identity parse refuses silently stops merge detection.
+test_relaunch_keeps_an_armed_merge_watch_authenticated() {
+  local dir out rc state url=https://github.com/example/repo/pull/31
+  dir=$(new_case merge-watch rl31)
+  add_ship_task "$dir" rl31 claude
+  state="$dir/home/state"
+  {
+    printf 'pr=%s\n' "$url"
+    printf 'pr_head=%s\n' 0123456789abcdef0123456789abcdef01234567
+  } >> "$state/rl31.meta"
+  fm_pr_url_parse "$url" || fail "merge-watch fixture URL was invalid"
+  fm_pr_poll_prepare "$state" rl31 "$FM_PR_PROVIDER" "$FM_PR_URL" "$FM_PR_HOST" \
+    "$FM_PR_PATH" "$FM_PR_NUMBER" "$ROOT/bin/fm-pr-poll.sh" \
+    || fail "could not prepare the merge-watch fixture"
+  fm_pr_poll_publish_prepared || fail "could not arm the merge-watch fixture"
+  fm_pr_poll_snapshot_capture "$state" rl31 "$ROOT/bin/fm-pr-poll.sh" \
+    || fail "the merge watch must authenticate before the relaunch"
+
+  out=$(run_control "$dir" rl31 relaunch --note "continuing after the PR opened"); rc=$?
+  expect_code 0 "$rc" "relaunch of a worker with an open PR should succeed"$'\n'"$out"
+  [ -n "$(meta_field "$dir" rl31 control_relaunch_tx)" ] \
+    || fail "the control relaunch must record its transaction in the task record"
+  fm_pr_poll_snapshot_capture "$state" rl31 "$ROOT/bin/fm-pr-poll.sh" \
+    || fail "the merge watch must still authenticate after the relaunch"$'\n'"$(cat "$state/rl31.meta")"
+  [ "$FM_PR_POLL_SNAPSHOT_URL" = "$url" ] \
+    || fail "the authenticated merge watch must still name the task PR"
+  pass "fm-control relaunch: an armed merge watch stays authenticated across a relaunch"
 }
 
 test_relaunch_serializes_concurrent_durable_metadata_publication() {
@@ -2445,6 +2478,7 @@ test_relaunch_refuses_before_exit_when_the_composer_holds_pending_text
 test_relaunch_refuses_before_exit_when_the_composer_state_is_unproven
 test_relaunch_from_linked_home_preserves_recorded_worktree
 test_relaunch_preserves_durable_task_metadata
+test_relaunch_keeps_an_armed_merge_watch_authenticated
 test_relaunch_serializes_concurrent_durable_metadata_publication
 test_disabled_relaunch_clears_prior_trace_context
 test_relaunch_appends_the_progress_note_to_the_instructions
