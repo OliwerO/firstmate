@@ -12,9 +12,11 @@
 #   3. The persist request is the task-subset of /stow: it asks for open records
 #      and task status, and explicitly not for the memory, learnings, or
 #      captain-preference sweeps.
-#   4. Every unsafe case says what is known: pre-restart capability and persist
-#      failures use the nudge path, while a failed relaunch is reported as an
-#      unknown outcome; none is reported as a clean reload.
+#   4. Every unsafe case says what is known: pre-restart capability failures and
+#      known persist non-deliveries use the nudge path, an unconfirmed persist
+#      delivery keeps its expectation and still gates on the answer, and a
+#      failed relaunch is reported as an unknown outcome; none is reported as a
+#      clean reload, and each reason carries the sending command's own failure.
 #   5. A remote mate restarts by running the SAME local control-plane relaunch on
 #      its host, over the fm-on transport, with the profile resolved from the
 #      PARENT's own pin rather than the remote home's copy of it.
@@ -469,6 +471,10 @@ case "${FM_FAKE_SSH_MODE:-ok}" in
 esac
 case "${rargs[1]:-}" in
   send)
+    # A host whose leg (queue, record write, then doorbell) outlasts fm-send's
+    # interactive default bound: the mate hears the doorbell, and so answers,
+    # only if the leg is allowed to finish rather than cancelled at the bound.
+    [ "${FM_FAKE_SSH_MODE:-ok}" != slow-ring ] || /bin/sleep 32
     # Model the live remote mate: act on the instruction and report back on the
     # parent channel, carrying the correlation token the request embedded.
     if [ -n "${FM_FAKE_ANSWER_STATUS:-}" ]; then
@@ -476,6 +482,9 @@ case "${rargs[1]:-}" in
       [ -z "$corr" ] || printf 'done [%s]: open records written down\n' "$corr" \
         >> "$FM_FAKE_ANSWER_STATUS"
     fi
+    # The record landed and the mate answered, but the hop itself outlives the
+    # sender's transport budget, so the sender cannot confirm the enqueue.
+    [ "${FM_FAKE_SSH_MODE:-ok}" != slow-send ] || /bin/sleep 8
     ;;
   relaunch)
     case "${FM_FAKE_SSH_MODE:-ok}" in
@@ -531,19 +540,93 @@ test_remote_mate_restarts_over_the_transport_hop() {
   pass "T6 a remote mate restarts through the host-local control plane over the fm-on hop"
 }
 
+# queue_unrelated_wake <case-dir>: leave one unread wake row in the parent home,
+# so every fm-send this pass runs prints the supervision guard's queued-wake
+# WARNING line ahead of its own outcome, exactly as a live home with backlog does.
+queue_unrelated_wake() {
+  printf '%s\t1\tcheck\tinbox:unrelated\tcheck: an unrelated captain inbox note\n' \
+    "$(date +%s)" > "$1/home/state/.wake-queue"
+  printf '1\n' > "$1/home/state/.wake-queue.seq"
+}
+
 # --- T7: an unreachable host is unknown, never a claimed reload --------------
+# The transport drops twice, so fm-send cannot tell whether the remote enqueue
+# ran: the report must carry that real failure, not the supervision warnings the
+# send printed first, and the request that may have landed keeps its expectation.
 test_unreachable_host_is_reported_unknown() {
-  local dir out rc
+  local dir out rc persist_rec
   dir=$(new_case unreachable)
   setup_remote_case "$dir" sm3 unreachable
+  queue_unrelated_wake "$dir"
 
-  out=$(run_restart "$dir" sm3); rc=$?
+  # Every fm-send runs this same guard first; without its warning the reason
+  # checks below would pass vacuously.
+  assert_contains "$(FM_HOME="$dir/home" "$ROOT/bin/fm-guard.sh" 2>&1)" "WARNING: queued wakes pending" \
+    "the fixture must make fm-send's guard print its queued-wake warning"
+
+  out=$(FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm3); rc=$?
 
   expect_code 3 "$rc" "an unreachable host must not be reported as a reload"$'\n'"$out"
   assert_not_contains "$out" "restarted: sm3" "an unreachable host must not be claimed as restarted"
-  assert_contains "$out" "sm3:" "the unreachable mate must still be named"
-  assert_contains "$out" "could not be delivered" "an unreachable host must be reported as undelivered, not as reloaded"
-  pass "T7 an unreachable host is reported honestly instead of claimed as reloaded"
+  assert_contains "$out" "unreached: sm3:" "the unreachable mate must still be named"
+  assert_contains "$out" "the request itself was not confirmed delivered: steer to remote secondmate sm3 is unconfirmed" \
+    "the persist reason must carry fm-send's own failure"
+  assert_contains "$out" "the re-read message was not confirmed delivered either: steer to remote secondmate sm3 is unconfirmed" \
+    "the nudge reason must carry fm-send's own failure"
+  assert_not_contains "$(grep '^unreached: sm3:' <<<"$out")" "WARNING:" \
+    "a supervision warning from fm-send was reported as the failure"
+  assert_not_contains "$(grep '^unreached: sm3:' <<<"$out")" "●" \
+    "the supervision banner from fm-send was reported as the failure"
+  assert_not_contains "$out" "could not be delivered" \
+    "a send whose completion is unknown must not be claimed as undelivered"
+  persist_rec=$(grep -l '^request_summary=Firstmate was updated and I am about to restart your agent' "$dir/home/state/pending-replies"/* 2>/dev/null | head -1)
+  [ -n "$persist_rec" ] \
+    || fail "the persist expectation was discarded although its request may have landed"$'\n'"$(ls -la "$dir/home/state/pending-replies" 2>&1)"
+  assert_grep 'phase=delivery_unknown' "$persist_rec" \
+    "the kept persist expectation must stay on the unknown-delivery path"
+  pass "T7 an unreachable host is reported with fm-send's real failure, and its request stays tracked"
+}
+
+# --- T7b: an unconfirmed persist request still gates on the mate's answer ----
+# The request lands and the mate answers, but the hop outlives fm-send's budget.
+# The answer is the gate, so the mate is restarted instead of being reported
+# unreached on a send that did reach it.
+test_unconfirmed_persist_still_gates_on_the_answer() {
+  local dir out rc
+  dir=$(new_case unconfirmed)
+  setup_remote_case "$dir" sm4 slow-send
+  queue_unrelated_wake "$dir"
+  export FM_FAKE_ANSWER_STATUS="$dir/home/state/sm4.status"
+
+  out=$(FM_SEND_REMOTE_BUDGET=5 run_restart "$dir" sm4); rc=$?
+  unset FM_FAKE_ANSWER_STATUS
+
+  expect_code 0 "$rc" "an answered persist request must restart the mate even when its send was unconfirmed"$'\n'"$out"
+  assert_contains "$out" "restarted: sm4 on remote-mac" "the answered mate was not restarted"
+  assert_not_contains "$out" "unreached: sm4" "a mate that answered must not be reported unreached"
+  grep -h '^phase=' "$dir/home/state/pending-replies"/* | grep -q '^phase=resolved$' \
+    || fail "the answer to an unconfirmed persist request did not settle its expectation"
+  pass "T7b an unconfirmed persist request still gates on, and is released by, the mate's answer"
+}
+
+# --- T7c: a remote leg longer than fm-send's interactive bound still rings ----
+# On a real host the leg can outlast fm-send's interactive default, and a leg
+# cut off at that bound is cancelled after its record lands but before its
+# doorbell rings, so the mate never hears the request. This pass waits minutes
+# anyway, so its own sends must be allowed to finish.
+test_slow_remote_leg_still_rings_within_the_pass_bound() {
+  local dir out rc
+  dir=$(new_case slow-leg)
+  setup_remote_case "$dir" sm6 slow-ring
+  export FM_FAKE_ANSWER_STATUS="$dir/home/state/sm6.status"
+
+  out=$(unset FM_SEND_REMOTE_BUDGET; FM_TEST_PERSIST_WAIT=0 run_restart "$dir" sm6); rc=$?
+  unset FM_FAKE_ANSWER_STATUS
+
+  expect_code 0 "$rc" "a remote leg slower than fm-send's interactive bound must still reach the mate"$'\n'"$out"
+  assert_contains "$out" "restarted: sm6 on remote-mac" "the mate whose leg was slow was not restarted"
+  assert_not_contains "$out" "unconfirmed" "the pass cut its own send off before the doorbell finished"
+  pass "T7c a remote leg longer than fm-send's interactive bound still completes within this pass"
 }
 
 # --- T8: a local restart lands on this home's durable pin, and says which -----
@@ -858,6 +941,8 @@ test_local_restart_uses_the_home_pin_and_reports_what_ran
 test_native_ultra_restart_keeps_local_and_remote_profiles
 test_remote_mate_restarts_over_the_transport_hop
 test_unreachable_host_is_reported_unknown
+test_unconfirmed_persist_still_gates_on_the_answer
+test_slow_remote_leg_still_rings_within_the_pass_bound
 test_concurrent_reply_cannot_release_persist_gate
 test_persist_waits_are_polled_together
 test_post_stop_failure_is_reported_unreached

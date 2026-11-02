@@ -40,6 +40,12 @@
 # restart gets the ordinary re-read nudge and is reported as a nudge, never as a
 # clean reload. Once a relaunch is attempted, any failed or ambiguous result is
 # reported as unknown rather than attributing it to either incarnation.
+# A persist request whose delivery fm-send reports as unconfirmed may already
+# sit in the mate's inbox, so it is not an undelivered one: its expectation
+# stays open and its answer remains the gate within the same bound, and only a
+# known non-delivery drops the expectation and falls back at once. Every
+# failure reason carries the sending command's own error line, never the
+# supervision warnings bin/fm-guard.sh prints ahead of it.
 #
 # Placement changes the transport and nothing else. A local mate is restarted
 # with bin/fm-control.sh <id> relaunch, which republishes this home's own
@@ -62,6 +68,14 @@
 # Environment knobs:
 #   FM_SECONDMATE_PERSIST_WAIT  seconds to wait for one mate's persist answer (900)
 #   FM_SECONDMATE_PERSIST_POLL  seconds between checks of that answer (5)
+#   FM_SEND_REMOTE_BUDGET       bound on each remote send attempt this pass makes
+#                               (180). fm-send's own default is sized for an
+#                               interactive call, and a remote host's leg - queue,
+#                               record write, then doorbell - can outlast it, so
+#                               the host cancels the job after the record lands
+#                               and before the doorbell rings. This pass already
+#                               waits minutes for answers, so it can afford a
+#                               bound that lets the doorbell finish.
 #
 # Exit status: 0 every named mate restarted; 3 at least one was nudged or left
 # unreached and every mate was still accounted for; 1 the input itself is
@@ -72,7 +86,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 
 usage() {
-  sed -n '2,65{s/^# \{0,1\}//;p;}' "$0"
+  sed -n '2,79{s/^# \{0,1\}//;p;}' "$0"
 }
 
 case "${1:-}" in
@@ -97,6 +111,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 
 PERSIST_WAIT=${FM_SECONDMATE_PERSIST_WAIT:-900}
 PERSIST_POLL=${FM_SECONDMATE_PERSIST_POLL:-5}
+# fm-send validates the value; a bad one surfaces as that send's own error.
+SEND_REMOTE_BUDGET=${FM_SEND_REMOTE_BUDGET:-180}
 case "$PERSIST_WAIT" in ''|*[!0-9]*) echo "error: FM_SECONDMATE_PERSIST_WAIT must be a non-negative integer: $PERSIST_WAIT" >&2; exit 2 ;; esac
 case "$PERSIST_POLL" in ''|*[!0-9]*|0) echo "error: FM_SECONDMATE_PERSIST_POLL must be a positive integer: $PERSIST_POLL" >&2; exit 2 ;; esac
 
@@ -121,6 +137,7 @@ done
 # reason already decided.
 PLAN=()
 REASON=()
+UNCONFIRMED=()
 CORR=()
 DEADLINE=()
 PLACEMENT=()
@@ -135,11 +152,19 @@ restarted_count=0
 nudged_count=0
 unreached_count=0
 
-# The first line of a command's output that carries anything, flattened to one
-# readable line with its "error: " prefix dropped. A refusal's own words are the
-# most useful thing this report can carry, and its first line is often blank.
-first_reported_line() {  # <text>
-  printf '%s\n' "$1" | sed -n '/./{s/^error: //;s/[[:space:]]\{1,\}/ /g;p;q;}'
+# The failure a command reported, flattened to one readable line with its
+# "error: " prefix dropped. A refusal's own words are the most useful thing this
+# report can carry. A failing command states them on an "error: " line, and
+# whatever it printed first is not the failure: every fm-send starts by running
+# bin/fm-guard.sh, whose supervision banner and WARNING lines precede the send's
+# own outcome. So the first error line wins, and output without one falls back
+# to its last line that carries anything, where a command's conclusion lands.
+reported_failure_line() {  # <text>
+  local line
+  line=$(printf '%s\n' "$1" | sed -n '/^error: /{s/^error: //;s/[[:space:]]\{1,\}/ /g;p;q;}')
+  [ -n "$line" ] \
+    || line=$(printf '%s\n' "$1" | awk 'NF { last = $0 } END { gsub(/[[:space:]]+/, " ", last); print last }')
+  printf '%s' "$line"
 }
 
 # Send the ordinary re-read steer to a mate this pass will not restart, and say
@@ -147,13 +172,14 @@ first_reported_line() {  # <text>
 fall_back_to_nudge() {  # <id> <reason>
   local id=$1 reason=$2 out
   if out=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+    FM_SEND_REMOTE_BUDGET="$SEND_REMOTE_BUDGET" \
     "$SCRIPT_DIR/fm-send.sh" "$id" "$FM_SECOND_MATE_NUDGE_MESSAGE" 2>&1); then
     nudged_count=$((nudged_count + 1))
     printf 'nudged: %s: %s\n' "$id" "$reason"
   else
     unreached_count=$((unreached_count + 1))
-    printf 'unreached: %s: %s; the re-read message could not be delivered either: %s\n' \
-      "$id" "$reason" "$(first_reported_line "$out")"
+    printf 'unreached: %s: %s; the re-read message was not confirmed delivered either: %s\n' \
+      "$id" "$reason" "$(reported_failure_line "$out")"
   fi
 }
 
@@ -186,7 +212,7 @@ restart_mate() {  # <array-index>
     return
   fi
 
-  restart_reason=$(first_reported_line "$restart_out")
+  restart_reason=$(reported_failure_line "$restart_out")
   [ -n "$restart_reason" ] || restart_reason="the restart failed without a reported reason"
   report_unreached "$id" "the restart outcome is unknown: $restart_reason"
 }
@@ -252,6 +278,7 @@ while [ "$i" -lt "${#IDS[@]}" ]; do
   id=${IDS[$i]}
   PLAN[i]="fallback"
   REASON[i]=""
+  UNCONFIRMED[i]=""
   CORR[i]=""
   DEADLINE[i]=""
   PLACEMENT[i]=""
@@ -296,12 +323,20 @@ while [ "$i" -lt "${#IDS[@]}" ]; do
     continue
   fi
   if ! send_out=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
-    FM_PENDING_REPLY_EXISTING_CORR="$corr" \
+    FM_PENDING_REPLY_EXISTING_CORR="$corr" FM_SEND_REMOTE_BUDGET="$SEND_REMOTE_BUDGET" \
     "$SCRIPT_DIR/fm-send.sh" "$id" "$FM_SECONDMATE_PERSIST_REQUEST" 2>&1); then
-    fm_pending_reply_discard_undelivered "$STATE" "$corr" >/dev/null 2>&1 || true
-    REASON[i]="the request to write down its open work could not be delivered: $(first_reported_line "$send_out")"
-    i=$((i + 1))
-    continue
+    send_reason=$(reported_failure_line "$send_out")
+    [ -n "$send_reason" ] || send_reason="the send failed without a reported reason"
+    if [ "$(fm_pending_reply_get "$(fm_pending_reply_path "$STATE" "$corr")" phase)" = delivery_unknown ]; then
+      # fm-send kept the expectation because the request may have landed; its
+      # answer, not the transport's confirmation, is what releases the gate.
+      UNCONFIRMED[i]=$send_reason
+    else
+      fm_pending_reply_discard_undelivered "$STATE" "$corr" >/dev/null 2>&1 || true
+      REASON[i]="the request to write down its open work could not be delivered: $send_reason"
+      i=$((i + 1))
+      continue
+    fi
   fi
   CORR[i]=$corr
   DEADLINE[i]=$(($(date +%s) + PERSIST_WAIT))
@@ -357,8 +392,10 @@ while [ "$((pending_count + restart_active_count))" -gt 0 ]; do
         pending_count=$((pending_count - 1))
         launch_restart "$i"
       else
-        fall_back_to_nudge "${IDS[$i]}" \
-          "it did not confirm within ${PERSIST_WAIT}s that its open work is written down, so its conversation was not spent"
+        timeout_reason="it did not confirm within ${PERSIST_WAIT}s that its open work is written down, so its conversation was not spent"
+        [ -z "${UNCONFIRMED[i]}" ] \
+          || timeout_reason="$timeout_reason; the request itself was not confirmed delivered: ${UNCONFIRMED[i]}"
+        fall_back_to_nudge "${IDS[$i]}" "$timeout_reason"
         PLAN[i]="done"
         pending_count=$((pending_count - 1))
       fi
