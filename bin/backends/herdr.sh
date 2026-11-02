@@ -3240,7 +3240,8 @@ fm_backend_herdr_rendered_busy_state() {  # <target> [harness] -> busy|idle|unkn
 # fm_composer_queued_enter_verdict confirms delivery. When native identity is
 # Claude, text is typed only into an empty composer and Enter is sent only
 # after the composer shows the payload (fm_backend_herdr_composer_payload_shown).
-# A missing read, a shorter suffix, or a paste placeholder followed by a
+# A read showing only a leading part of the payload is re-taken up to <retries>
+# times, <settle> apart, before it is judged. A missing read, a shorter suffix, or a paste placeholder followed by a
 # literal remainder does not press Enter: the composer is cleared back to
 # empty and the verdict is send-failed, or unknown when the clear cannot be
 # verified. Other harnesses skip this proof. Verified hazard
@@ -3409,6 +3410,24 @@ fm_backend_herdr_composer_payload_shown() {  # <text> <after>
   [ -z "$literal" ]
 }
 
+# fm_backend_herdr_composer_payload_arriving: 0 when <after>, read from a
+# composer that was empty before the send, is a strict leading part of <text>
+# (empty included), the shape of a payload the harness has not finished
+# rendering. Claude repaints typed input asynchronously, and mid-turn or on a
+# slow host the first read after the settle can still show none or only the
+# head of it, so that read is re-taken within a bound. A suffix, a stale head, or
+# a placeholder plus remainder is not a leading part and is refused at once.
+fm_backend_herdr_composer_payload_arriving() {  # <text> <after>
+  local text=$1 after=$2
+  fm_composer_normalize_spaces_var text
+  fm_composer_normalize_spaces_var after
+  text=${text//[$' \t\r\n\v\f']/}
+  text=${text//$'\xE2\x81\xA3'/}
+  after=${after//[$' \t\r\n\v\f']/}
+  after=${after//$'\xE2\x81\xA3'/}
+  [ "${#after}" -lt "${#text}" ] && [ "${text:0:${#after}}" = "$after" ]
+}
+
 # fm_backend_herdr_composer_clear: after a refused proof, press Ctrl+U until
 # the shared classifier reads the composer as empty. Claude documents Ctrl+U
 # as delete-to-line-start, repeated across lines of a multiline draft; Ctrl+C
@@ -3430,7 +3449,7 @@ fm_backend_herdr_composer_clear() {  # <target> <text>
 
 fm_backend_herdr_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle>
   local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 i=0 verdict baseline confirm_sleep
-  local raw_status footer_baseline='' allow_rendered=0 enter_sent=0 identity proof=0 content
+  local raw_status footer_baseline='' allow_rendered=0 enter_sent=0 identity proof=0 content shown reads=0
   fm_backend_herdr_parse_target "$target" || { printf 'unknown'; return 0; }
   # Claude on Herdr is the live-verified truncation shape: Enter is withheld
   # unless the composer, empty before the send, shows this payload. A suffix
@@ -3446,8 +3465,19 @@ fm_backend_herdr_send_text_submit() {  # <target> <text> <retries> <enter-sleep>
   fm_backend_herdr_send_literal "$target" "$text" || { printf 'send-failed'; return 0; }
   sleep "$settle"
   if [ "$proof" = 1 ]; then
-    if ! content=$(fm_backend_herdr_composer_content "$target") \
-      || ! fm_backend_herdr_composer_payload_shown "$text" "$content"; then
+    shown=0
+    while content=$(fm_backend_herdr_composer_content "$target"); do
+      if fm_backend_herdr_composer_payload_shown "$text" "$content"; then
+        shown=1
+        break
+      fi
+      if [ "$reads" -ge "$retries" ] || ! fm_backend_herdr_composer_payload_arriving "$text" "$content"; then
+        break
+      fi
+      reads=$((reads + 1))
+      sleep "$settle"
+    done
+    if [ "$shown" = 0 ]; then
       if fm_backend_herdr_composer_clear "$target" "$text"; then
         printf 'send-failed'
       else

@@ -157,11 +157,13 @@ unreached_count=0
 # report can carry. A failing command states them on an "error: " line, and
 # whatever it printed first is not the failure: every fm-send starts by running
 # bin/fm-guard.sh, whose supervision banner and WARNING lines precede the send's
-# own outcome. So the first error line wins, and output without one falls back
+# own outcome. So the first error line wins, minus a closing sentence that only
+# introduces the lines after it, which this one-line report does not carry;
+# output without an error line falls back
 # to its last line that carries anything, where a command's conclusion lands.
 reported_failure_line() {  # <text>
   local line
-  line=$(printf '%s\n' "$1" | sed -n '/^error: /{s/^error: //;s/[[:space:]]\{1,\}/ /g;p;q;}')
+  line=$(printf '%s\n' "$1" | sed -n '/^error: /{s/^error: //;s/[[:space:]]\{1,\}/ /g;s/\. [^.]*:[[:space:]]*$/./;p;q;}')
   [ -n "$line" ] \
     || line=$(printf '%s\n' "$1" | awk 'NF { last = $0 } END { gsub(/[[:space:]]+/, " ", last); print last }')
   printf '%s' "$line"

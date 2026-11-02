@@ -579,6 +579,8 @@ test_unreachable_host_is_reported_unknown() {
     "the supervision banner from fm-send was reported as the failure"
   assert_not_contains "$out" "could not be delivered" \
     "a send whose completion is unknown must not be claimed as undelivered"
+  assert_not_contains "$out" "resend below" \
+    "the reason must not point at a resend command it does not carry"
   persist_rec=$(grep -l '^request_summary=Firstmate was updated and I am about to restart your agent' "$dir/home/state/pending-replies"/* 2>/dev/null | head -1)
   [ -n "$persist_rec" ] \
     || fail "the persist expectation was discarded although its request may have landed"$'\n'"$(ls -la "$dir/home/state/pending-replies" 2>&1)"
