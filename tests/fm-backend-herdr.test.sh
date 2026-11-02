@@ -4912,6 +4912,7 @@ test_send_text_submit_long_literal_submits_when_composer_holds_every_byte() {
 test_send_text_submit_rereads_a_claude_payload_still_rendering() {
   local dir log resp fb out enter_count text
   dir="$TMP_ROOT/submit-still-rendering"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  # shellcheck disable=SC2016 # literal $FM_TASK_INBOX is the doorbell wording under test
   text=': Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your '"'"'sm.inbox'"'"' steering inbox, read and act on each in numeric order, then mv each into its handled/.'
   printf '{"result":{"agent":{"agent":"claude","agent_status":"idle"}}}\n' > "$resp/1.out"
   printf '  \xe2\x9d\xaf\n' > "$resp/2.out"
