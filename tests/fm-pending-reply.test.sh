@@ -36,6 +36,8 @@
 #      the decision; a retry while that decision is still open appends nothing
 #  19. The tick reports progress between the records it works, so the watcher's
 #      liveness beacon can advance between records that make remote calls
+#  20. A remote busy observation that hangs is cut at the tick's remote bound
+#      and read as unknown, so one hung ssh cannot hold the tick
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -1432,6 +1434,54 @@ test_tick_reports_progress_between_records() {
   pass "pending-reply tick reports progress between the records it works"
 }
 
+# A remote mate's busy observation goes through fm-on.sh and ssh. A fake ssh
+# that never returns stands in for a hung connection: with a remote bound the
+# tick must finish shortly after it, its ssh process gone, and the open record
+# must stay open with nothing learned from the unknown observation.
+test_tick_bounds_a_hung_remote_observation() {
+  local home state fakebin corr sshlog tick_pid i sleeper started
+  home=$(setup_parent tick-hung-remote)
+  state="$home/state"
+  fakebin="$home/fakebin"
+  sshlog="$home/ssh.log"
+  mkdir -p "$home/data" "$fakebin"
+  # shellcheck disable=SC2031
+  export FM_PENDING_REPLY_NOW=5400
+  printf '%s\n' '- ios - Remote mate (host: remote-mac; root: /remote/root; home: /remote/ios-home; scope: remote work; projects: alpha; added 2026-01-01)' \
+    > "$home/data/secondmates.md"
+  fm_write_meta "$state/ios.meta" \
+    "window=fm-remote:w1:p1" "harness=claude" "kind=secondmate" "mode=secondmate" \
+    "remote_host=remote-mac" "remote_root=/remote/root" "remote_backend=herdr"
+  cat > "$fakebin/ssh" <<SH
+#!/usr/bin/env bash
+printf '%s %s\\n' "\$\$" "\$(date +%s)" >> '$sshlog'
+exec sleep 300
+SH
+  chmod +x "$fakebin/ssh"
+  corr=$(fm_pending_reply_create "$home" "$state" ios "status of the iOS build")
+  fm_pending_reply_mark_delivered "$state" "$corr"
+  ( FM_HOME="$home" FM_DATA_OVERRIDE="$home/data" FM_SSH_BIN="$fakebin/ssh" \
+      fm_pending_reply_tick "$state" "" 2 ) &
+  tick_pid=$!
+  i=0
+  while [ "$i" -lt 300 ] && kill -0 "$tick_pid" 2>/dev/null; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  if kill -0 "$tick_pid" 2>/dev/null; then
+    kill "$tick_pid" 2>/dev/null || true
+    while read -r sleeper _; do kill "$sleeper" 2>/dev/null || true; done < "$sshlog"
+    fail "the tick was still held by a hung remote observation 30s after its 2s bound"
+  fi
+  wait "$tick_pid" || fail "a hung remote observation changed the tick result"
+  read -r sleeper started < "$sshlog" 2>/dev/null || true
+  [ -n "${started:-}" ] || fail "the tick never reached ssh for the remote observation"
+  ! kill -0 "$sleeper" 2>/dev/null || fail "the hung remote observation was not cut at its bound (fake ssh pid $sleeper still running)"
+  [ "$(phase_of "$state" "$corr")" = awaiting_report ] \
+    || fail "an unknown observation changed the open record's phase to $(phase_of "$state" "$corr")"
+  pass "pending-reply tick cuts a hung remote observation at its bound"
+}
+
 test_tick_leaves_settled_records_alone() {
   local home state settled closed open_esc awaiting rec i copy holder tick_pid ticked=0 open lib
   local sums_before sums_after holder_lock_pid
@@ -2141,6 +2191,7 @@ test_kimi_capture_fallback_uses_recorded_harness
 test_tick_skips_terminal_and_reuses_target_observation
 test_tick_leaves_settled_records_alone
 test_tick_reports_progress_between_records
+test_tick_bounds_a_hung_remote_observation
 test_correlations_reuse_only_for_matching_open_task
 test_tick_end_to_end_missed_then_escalate
 test_failed_send_discards_undelivered_expectation

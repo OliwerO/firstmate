@@ -111,9 +111,12 @@ fm_secondmate_liveness_recent_attempts() {  # <id> <window-secs>
     "$ledger" 2>/dev/null
 }
 
-# fm_secondmate_liveness_probe <meta> <id> <full|poll>
+# fm_secondmate_liveness_probe <meta> <id> <full|poll> [remote-timeout]
 #
-# Read-only probe of one registered secondmate's recorded endpoint. Populates:
+# Read-only probe of one registered secondmate's recorded endpoint. A positive
+# [remote-timeout] bounds each remote fm-on.sh read through fm_run_timed, so a
+# hung ssh ends the probe as an unknown, preserved route (the same verdict as
+# an unreachable host) instead of holding the caller. Populates:
 #
 #   FM_SM_LIVE_STATUS  silent | alive | relaunchable | skipped
 #   FM_SM_LIVE_STATE   the raw classifier/state word
@@ -129,8 +132,13 @@ fm_secondmate_liveness_recent_attempts() {  # <id> <window-secs>
 #
 # The caller must hold fm_secondmate_liveness_lock for <id> whenever a
 # relaunchable verdict could be acted on.
-fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
-  local meta=$1 id=$2 mode=$3
+fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll> [remote-timeout]
+  local meta=$1 id=$2 mode=$3 remote_timeout=${4-}
+  local -a remote_bound=()
+  case "$remote_timeout" in
+    '' | 0* | *[!0-9]*) ;;
+    *) remote_bound=(fm_run_timed "$remote_timeout") ;;
+  esac
   FM_SM_LIVE_STATUS=skipped FM_SM_LIVE_STATE=unknown FM_SM_LIVE_KILL=0
   FM_SM_LIVE_CAUSE='' FM_SM_LIVE_WHERE='' FM_SM_LIVE_REASON='' FM_SM_LIVE_LINE=''
   local window harness remote_host remote_rc out agent_state readiness_reason route_out remote_backend
@@ -155,10 +163,14 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
         return 0
       fi
     fi
-    if out=$("$FM_SM_LIVE_LIB_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh state "$id" < /dev/null 2>/dev/null); then
+    if out=$(${remote_bound[@]+"${remote_bound[@]}"} "$FM_SM_LIVE_LIB_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh state "$id" < /dev/null 2>/dev/null); then
       remote_rc=0
     else
       remote_rc=$?
+    fi
+    if [ "${#remote_bound[@]}" -gt 0 ] && fm_timed_out "$remote_rc"; then
+      FM_SM_LIVE_REASON="remote endpoint state probe exceeded ${remote_timeout}s; route preserved on $remote_host"
+      return 0
     fi
     if [ "$remote_rc" -eq 255 ]; then
       FM_SM_LIVE_REASON="remote host unavailable or endpoint state unknown; route preserved on $remote_host"
@@ -173,12 +185,12 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
     case "$agent_state" in
       alive)
         if [ "$mode" = full ]; then
-          if route_out=$("$FM_SM_LIVE_LIB_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh route "$id" < /dev/null 2>/dev/null); then
+          if route_out=$(${remote_bound[@]+"${remote_bound[@]}"} "$FM_SM_LIVE_LIB_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh route "$id" < /dev/null 2>/dev/null); then
             remote_rc=0
           else
             remote_rc=$?
           fi
-          if [ "$remote_rc" -eq 255 ]; then
+          if [ "$remote_rc" -eq 255 ] || { [ "${#remote_bound[@]}" -gt 0 ] && fm_timed_out "$remote_rc"; }; then
             FM_SM_LIVE_REASON="remote host unavailable or endpoint route unknown; route preserved on $remote_host"
             return 0
           fi

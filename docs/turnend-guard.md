@@ -208,8 +208,9 @@ With `state/.afk` absent the daemon lock proves nothing and the strict watcher p
 
 `bin/fm-watch.sh` touches `state/.last-watcher-beat` at the top of each cycle, after each bounded step of that cycle's synchronous work, and immediately before its terminal wait (`event_wait_or_sleep`).
 A healthy watcher's beacon can therefore legitimately age up to `FM_POLL` seconds, or the duration of its slowest single step, between touches.
-A cycle whose steps together outlast the grace on a loaded host still reads as live, while one wedged step stops the beacon.
-`watcher_beat` in `bin/fm-watch.sh` owns which steps advance it.
+The steps that can hang - each remote `bin/fm-on.sh` read and `fm-procevent.sh reconcile` - are wall-clock bounded well under the grace, so a hung call ends its own step and the loop beats again.
+A cycle whose steps together outlast the grace on a loaded host therefore still reads as live, and a beacon past the grace means a wedged watcher.
+`watcher_beat` and the bounds in `bin/fm-watch.sh` own which steps advance it and how long each may take.
 
 A fixed 300-second grace default stops correctly bounding staleness once a home's `FM_POLL` reaches or exceeds it.
 A perfectly healthy watcher mid-wait would then read stale at the edge of every full poll cycle by definition.
@@ -234,7 +235,6 @@ Once the live holder's beacon is stale past `FM_WATCHER_STALL_BOUND` (default th
 A watcher wedged mid-cycle can therefore no longer refuse every replacement indefinitely.
 `bin/fm-watch.sh`'s header owns the exact wording and the survives-TERM fallback.
 Below that bound a stale beacon alone does not end an attached arm's watch of a live, identity-matched holder; a changed lock can end it sooner.
-A fresh arm, such as the Stop-hook auto-arm, that meets such a holder already past the grace attaches and follows it the same way, because a watcher started beside it would only refuse.
 At the bound the arm reports a typed stalled-holder failure so its owner's retry can replace the holder.
 `fm_watcher_stall_bound` in `bin/fm-wake-lib.sh` owns the shared derivation; `bin/fm-watch-arm.sh`'s header owns the exact attached-arm close behavior.
 

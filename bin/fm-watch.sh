@@ -162,8 +162,10 @@
 # evicted with TERM after its recorded identity is re-verified, and this arm
 # starts in its place, printing "watcher: replaced stalled pid <N> (...)". A
 # holder that survives TERM keeps the refusal and the nonzero exit.
-# bin/fm-watch-arm.sh never starts a watcher beside a live holder under that
-# bound; it attaches and follows the holder instead (its header owns that).
+# Every cycle step that can run long either advances the beacon as it goes
+# (watcher_beat) or is wall-clock bounded (REMOTE_CALL_TIMEOUT,
+# RECONCILE_TIMEOUT), so a beacon past the grace means a wedged watcher, not a
+# slow one.
 # Once per poll the watcher also checks that its home (when it existed at
 # start), its state directory, and its own bin directory still exist; when one
 # is gone it logs "watcher: exiting - <what> no longer exists: <path>" to stderr
@@ -377,6 +379,16 @@ case "$SECONDMATE_LIVENESS_SECS" in ''|*[!0-9]*|0) SECONDMATE_LIVENESS_SECS=60 ;
 # Per-relaunch wall-clock bound, so a wedged spawn cannot stall the poll.
 SECONDMATE_LIVENESS_TIMEOUT=${FM_SECONDMATE_LIVENESS_TIMEOUT:-}
 case "$SECONDMATE_LIVENESS_TIMEOUT" in ''|*[!0-9]*|0) SECONDMATE_LIVENESS_TIMEOUT=120 ;; esac
+# Wall-clock bounds for the cycle's remote and long steps, kept well under the
+# guard grace: a hung call ends its own step (a remote read becomes an unknown
+# observation, a cut reconcile is retried next poll) and the loop beats again,
+# so a wedged step cannot hold the lock with a frozen beacon. REMOTE_CALL_TIMEOUT
+# bounds each remote fm-on.sh read (secondmate liveness state probe, pending-
+# reply busy observation); RECONCILE_TIMEOUT bounds `fm-procevent.sh reconcile`.
+REMOTE_CALL_TIMEOUT=${FM_WATCH_REMOTE_CALL_TIMEOUT:-}
+case "$REMOTE_CALL_TIMEOUT" in ''|*[!0-9]*|0*) REMOTE_CALL_TIMEOUT=60 ;; esac
+RECONCILE_TIMEOUT=${FM_WATCH_RECONCILE_TIMEOUT:-}
+case "$RECONCILE_TIMEOUT" in ''|*[!0-9]*|0*) RECONCILE_TIMEOUT=240 ;; esac
 # Relaunch bound: at most this many automatic attempts per window per mate,
 # counted from the durable attempt ledger the shared library appends to. A mate
 # that keeps dying past the bound wakes once and is parked until a probe reads
@@ -1090,7 +1102,7 @@ secondmate_liveness_tick() {
     id=${id%.meta}
     case "$id" in ''|*[!A-Za-z0-9._-]*) continue ;; esac
     fm_secondmate_liveness_lock "$id" || continue
-    fm_secondmate_liveness_probe "$meta" "$id" poll
+    fm_secondmate_liveness_probe "$meta" "$id" poll "$REMOTE_CALL_TIMEOUT"
     bound_marker="$STATE/.secondmate-relaunch-bound-$id"
     reason='' notify_key='' err=''
     case "$FM_SM_LIVE_STATUS" in
@@ -1146,7 +1158,7 @@ secondmate_liveness_tick() {
       triage_log "secondmate $id liveness error: $err" || true
       failed=1
     fi
-    # A remote probe can take as long as its ssh does; beat between mates.
+    # A remote probe can take up to its bound; beat between mates.
     watcher_beat
   done
   [ -z "$first_reason" ] || wake "$first_reason"
@@ -2774,8 +2786,9 @@ while :; do
   # parent reports, observe backend busy/idle turn completion, send one recovery
   # repost after grace, and escalate once if the recovery turn is also missed.
   # No conversation scraping; unresolved records are never silently expired.
-  # Each record can make remote calls, so the beacon advances between records.
-  fm_pending_reply_tick "$STATE" watcher_beat || true
+  # Each record can make a bounded remote call, so the beacon advances between
+  # records.
+  fm_pending_reply_tick "$STATE" watcher_beat "$REMOTE_CALL_TIMEOUT" || true
 
   # Endpoint liveness runs before queue observation: a positively dead or
   # missing secondmate endpoint is relaunched here on a bounded cadence, which
@@ -2799,9 +2812,11 @@ while :; do
   # Process-to-event liveness repair. This never discovers a result by polling:
   # each registered source has its own child blocking on that source, and this
   # only republishes results already captured durably and restarts a source
-  # whose owner is gone. It is a no-op with nothing registered.
+  # whose owner is gone. It is a no-op with nothing registered. It is bounded
+  # (RECONCILE_TIMEOUT): a reconcile cut at the bound leaves only stale-owner
+  # lock evidence, which the next reconcile reclaims, and is retried next poll.
   if [ -d "$STATE/procevent" ]; then
-    FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-procevent.sh" reconcile >/dev/null 2>&1 || true
+    fm_run_timed "$RECONCILE_TIMEOUT" env FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-procevent.sh" reconcile >/dev/null 2>&1 || true
     watcher_beat
   fi
   # Then deliver any queued-but-unsurfaced result, including one a runner

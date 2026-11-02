@@ -26,8 +26,7 @@
 # single source of truth, shared with fm-watch.sh and fm-guard.sh), and prints
 # exactly one unambiguous status line:
 #   watcher: started pid=<N> (beacon fresh)              - it launched one and confirmed it
-#   watcher: attached pid=<N> (beacon <age>s)            - a live identity-matched watcher holds the
-#                                                          lock with a beacon under the stall bound;
+#   watcher: attached pid=<N> (beacon <age>s)            - a live+fresh successor holds the lock;
 #                                                          this arm attaches and follows it
 #   watcher: FAILED - no live watcher with a fresh beacon  - could not confirm one
 #   watcher: FAILED - cycle ended without an actionable reason
@@ -36,21 +35,17 @@
 #   watcher: FAILED - attached watcher pid=<N> stalled (beacon <age>s at or past hard bound <bound>s)
 #                                                        - the followed holder is alive but its beacon
 #                                                          reached the stall bound
-# It NEVER reports started/attached/healthy off a dead/reused pid, and never
-# reports started off a stale beacon: a dead-pid holder either self-heals (the
-# fresh child steals the dead lock per the singleton self-eviction/steal path and
-# is confirmed) or this returns the FAILED line. On started it waits the child and
-# propagates the wake reason; on attached it stays live across identity-matched
-# successors. A stale beacon alone does not end a followed cycle: while that
+# It NEVER reports started/attached/healthy off a stale beacon or a dead/reused pid: a
+# stale-beacon or dead-pid holder either self-heals (the fresh child steals the
+# dead lock per the singleton self-eviction/steal path and is confirmed) or this
+# returns the FAILED line. On started it waits the child and propagates the wake
+# reason; on attached it stays live across identity-matched successors. Once
+# attached, a stale beacon alone does not end the followed cycle: while that
 # holder is alive and the lock still names it under the same identity, the arm
 # keeps following it, as a started arm waits out a slow child, until the lock
 # changes or the beacon reaches fm_watcher_stall_bound (bin/fm-wake-lib.sh), the
 # age at which the watcher's own re-arm evicts it; there it fails with the
-# stalled-holder line so its owner's retry replaces the holder. That same
-# tolerance applies to a fresh arm: one that finds such a slow live holder
-# already past the grace but under the stall bound attaches and follows it,
-# because a watcher started beside it would only refuse ("lock held by live pid
-# ... but heartbeat is stale") and turn a slow cycle into a FAILED arm. A cycle
+# stalled-holder line so its owner's retry replaces the holder. A cycle
 # that ends with no reason line and no healthy successor is resolved against the
 # watcher's identity-bound delivery record: a matching record reports that wake
 # and exits 0, and only a cycle that delivered nothing is the typed nonzero
@@ -316,31 +311,10 @@ healthy_watcher() {
   HEALTHY_IDENTITY=$FM_WATCHER_HEALTHY_IDENTITY
 }
 
-report_attached() {  # [pid]
+report_attached() {
   local age
   age=$(fm_path_age "$BEAT")
-  echo "watcher: attached pid=${1:-$HEALTHY_PID} (beacon ${age}s)"
-}
-
-# A watcher that is alive and genuinely THIS home's (the same identity proof as
-# healthy_watcher) but whose beacon is past the grace and still under the stall
-# bound: a slow cycle, which the watcher itself refuses to start beside and only
-# evicts at the stall bound. Sets SLOW_HOLDER_PID and SLOW_HOLDER_IDENTITY. A
-# missing beacon never qualifies, so a holder with no observation is left to the
-# watcher's own startup refusal and recovery.
-SLOW_HOLDER_PID=
-SLOW_HOLDER_IDENTITY=
-slow_live_holder() {
-  local pid
-  SLOW_HOLDER_PID=
-  SLOW_HOLDER_IDENTITY=
-  pid=$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)
-  fm_pid_alive "$pid" || return 1
-  fm_watcher_lock_matches_pid "$STATE" "$WATCH" "$pid" "$FM_HOME" || return 1
-  [ -e "$BEAT" ] || return 1
-  [ "$(fm_path_age "$BEAT")" -lt "$STALL_BOUND" ] || return 1
-  SLOW_HOLDER_PID=$pid
-  SLOW_HOLDER_IDENTITY=$FM_WATCHER_MATCHED_IDENTITY
+  echo "watcher: attached pid=$HEALTHY_PID (beacon ${age}s)"
 }
 
 # Give a successor the same bounded confirmation window used for a fresh child.
@@ -644,18 +618,6 @@ if [ "$mode" = arm ] && healthy_watcher; then
   cycle_begin "$HEALTHY_PID" attached "$HEALTHY_IDENTITY"
   report_attached
   attach_and_wait "$HEALTHY_PID"
-  exit $?
-fi
-
-# A slow live holder gets the same follow-until-the-stall-bound tolerance an
-# already attached arm gives it (header): a child started now would only refuse
-# beside it. At the bound attach_and_wait fails with the typed stalled-holder
-# line, and the owner's retry reaches the watcher's own eviction.
-if [ "$mode" = arm ] && slow_live_holder; then
-  cycle_mark_predecessor_successor "attached:$SLOW_HOLDER_PID"
-  cycle_begin "$SLOW_HOLDER_PID" attached "$SLOW_HOLDER_IDENTITY"
-  report_attached "$SLOW_HOLDER_PID"
-  attach_and_wait "$SLOW_HOLDER_PID"
   exit $?
 fi
 

@@ -453,7 +453,7 @@ They also prove that a legacy or handoff-phase watcher marker from an absent rep
 - An append that reopens an announced empty recovery.
 - A watcher close inside the handling window that must leave the printed acknowledgement valid.
 - A re-arm whose recovery cycle is slowed after confirmation and must still surface rather than read as a watcher that stayed live.
-- A fresh arm that meets a live holder already past the grace and follows it to the stall bound, where the old arm started a watcher that refused and reported FAILED.
+- A fresh arm that meets a live holder already past the grace, which it reports as a failure and never as attached.
 - The self-healing moved-generation acknowledgement that consumes its handled rows and names its remedy.
 - The already-acknowledged confirmation no-op for a matching generation, with its mismatched-generation, dead-pid, and lock-mismatch rejections preserved.
 - The manual-restart generation churn that makes a confirmation for the churned generation report a mismatch, which an arm check without a reopen leaves in place.
@@ -479,6 +479,7 @@ It checks that a newly appended keyed decision is classified without rereading e
 - Bounded and successor-linked lifecycle rows.
 - A SIGSTOP counterfactual that distinguishes a live PID from a stale beacon before classifying termination.
 - A beacon that advances between the slow steps of one cycle instead of only at its top.
+- A hung remote step that is cut at its bound, after which the beacon advances again.
 
 ### Claude auto-arm and turn-end guard
 
