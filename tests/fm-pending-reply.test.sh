@@ -34,6 +34,8 @@
 #      uncached status read - accepting any verb - immediately before firing
 #  18. A same-kind escalation after an operator close appends again and reopens
 #      the decision; a retry while that decision is still open appends nothing
+#  19. The tick reports progress between the records it works, so the watcher's
+#      liveness beacon can advance between records that make remote calls
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -1396,6 +1398,40 @@ test_tick_skips_terminal_and_reuses_target_observation() {
 # tick selects the records it has work for in one pass and leaves every settled
 # record alone: it must not block on a settled record's per-record lock that a
 # live foreign process holds, and it still does the work the selected records need.
+# The watcher passes a progress function so its liveness beacon can advance
+# between records that make remote calls. It runs once before each record the
+# tick works and once after the last, a settled record costs no call, and its
+# status never changes the tick's own result.
+PROGRESS_CALLS=
+_count_tick_progress() {
+  printf 'x\n' >> "$PROGRESS_CALLS"
+  return 1
+}
+test_tick_reports_progress_between_records() {
+  local home state settled first second
+  home=$(setup_parent tick-progress)
+  state="$home/state"
+  # shellcheck disable=SC2031
+  export FM_PENDING_REPLY_NOW=5300
+  settled=$(fm_pending_reply_create "$home" "$state" hibit "settled request")
+  fm_pending_reply_mark_delivered "$state" "$settled"
+  printf 'done [corr=%s]: settled reply\n' "$settled" >> "$state/hibit.status"
+  fm_pending_reply_try_resolve "$state" "$settled" || fail "settled fixture should resolve"
+  first=$(fm_pending_reply_create "$home" "$state" one "first request")
+  fm_pending_reply_mark_delivered "$state" "$first"
+  second=$(fm_pending_reply_create "$home" "$state" two "second request")
+  fm_pending_reply_mark_delivered "$state" "$second"
+  PROGRESS_CALLS="$home/progress.calls"
+  : > "$PROGRESS_CALLS"
+  fm_pending_reply_tick "$state" _count_tick_progress \
+    || fail "a failing progress function changed the tick result"
+  [ "$(wc -l < "$PROGRESS_CALLS" | tr -d ' ')" -eq 3 ] \
+    || fail "progress ran $(wc -l < "$PROGRESS_CALLS" | tr -d ' ') times for two open records, expected 3"
+  [ "$(phase_of "$state" "$first")" = awaiting_report ] \
+    || fail "progress reporting changed an open record's phase"
+  pass "pending-reply tick reports progress between the records it works"
+}
+
 test_tick_leaves_settled_records_alone() {
   local home state settled closed open_esc awaiting rec i copy holder tick_pid ticked=0 open lib
   local sums_before sums_after holder_lock_pid
@@ -2104,6 +2140,7 @@ test_unknown_backend_state_uses_capture_fallback
 test_kimi_capture_fallback_uses_recorded_harness
 test_tick_skips_terminal_and_reuses_target_observation
 test_tick_leaves_settled_records_alone
+test_tick_reports_progress_between_records
 test_correlations_reuse_only_for_matching_open_task
 test_tick_end_to_end_missed_then_escalate
 test_failed_send_discards_undelivered_expectation

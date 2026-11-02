@@ -162,6 +162,8 @@
 # evicted with TERM after its recorded identity is re-verified, and this arm
 # starts in its place, printing "watcher: replaced stalled pid <N> (...)". A
 # holder that survives TERM keeps the refusal and the nonzero exit.
+# bin/fm-watch-arm.sh never starts a watcher beside a live holder under that
+# bound; it attaches and follows the holder instead (its header owns that).
 # Once per poll the watcher also checks that its home (when it existed at
 # start), its state directory, and its own bin directory still exist; when one
 # is gone it logs "watcher: exiting - <what> no longer exists: <path>" to stderr
@@ -279,10 +281,11 @@ fi
 # turn-ended signature, annotation staleness checks, and guarded bookkeeping writes.
 
 POLL=${FM_POLL:-15}                   # seconds between cycles
-# The liveness beacon is touched once per cycle, immediately before the
-# terminal wait below (event_wait_or_sleep) as well as at the top of the next
-# one, so a healthy cycle's beacon can legitimately age up to POLL seconds
-# between touches. fm_poll_derived_grace (bin/fm-wake-lib.sh, already sourced
+# The liveness beacon is touched at the top of each cycle, after each bounded
+# step of its synchronous work, and immediately before the terminal wait below
+# (event_wait_or_sleep; see watcher_beat), so a healthy cycle's beacon can
+# legitimately age up to POLL seconds, or one step's duration, between touches.
+# fm_poll_derived_grace (bin/fm-wake-lib.sh, already sourced
 # transitively above) is the single owner of the max(300, poll+60)
 # derivation - see docs/turnend-guard.md "Guard grace and the poll cadence".
 # This recomputes the library default above now that the real configured
@@ -1143,6 +1146,8 @@ secondmate_liveness_tick() {
       triage_log "secondmate $id liveness error: $err" || true
       failed=1
     fi
+    # A remote probe can take as long as its ssh does; beat between mates.
+    watcher_beat
   done
   [ -z "$first_reason" ] || wake "$first_reason"
   [ "$failed" -eq 0 ]
@@ -2687,6 +2692,24 @@ resurface_after_downtime() {
   wake "check: rearm-resurface"
 }
 
+# watcher_beat: advance the liveness beacon (BEAT) while this watcher still
+# holds the singleton lock. Only the poll loop below and the steps it runs call
+# it, never a detached helper: at the top of each cycle
+# and after each bounded step of the cycle's synchronous work (each pending
+# reply record, each secondmate probe, each check, each recorded window, and
+# each phase between them), so a cycle whose combined steps outlast the grace
+# on a loaded host still reads as live, while one wedged step stops the beacon
+# and reaches the stall bound. A lock naming another watcher leaves the beacon
+# to that watcher; the self-eviction test at the next cycle top owns standing
+# down. The builtin read and truncating redirect cost no fork; every reader
+# uses only the beacon's mtime.
+watcher_beat() {
+  local holder=
+  { IFS= read -r holder < "$WATCH_LOCK/pid"; } 2>/dev/null || [ -n "$holder" ] || return 0
+  [ "$holder" = "$WATCHER_PID" ] || return 0
+  { : > "$BEAT"; } 2>/dev/null || true
+}
+
 # Keys already queued at the launch-time boundary, for queue_surface_appended.
 queue_arm_snapshot || {
   echo "watcher: wake queue could not be snapshotted at arm time" >&2
@@ -2729,7 +2752,8 @@ while :; do
 
   # Liveness beacon for fm-guard.sh: a fresh mtime here means a watcher is
   # alive. Supervision scripts warn when this goes stale with tasks in flight.
-  touch "$STATE/.last-watcher-beat"
+  # The steps below advance it again as they finish (watcher_beat).
+  watcher_beat
 
   # Opt-in fleet activity ledger (docs/fleet-ledger.md): pick up newly appended
   # status lines before this cycle can exit on a wake. Off costs one file test.
@@ -2750,7 +2774,8 @@ while :; do
   # parent reports, observe backend busy/idle turn completion, send one recovery
   # repost after grace, and escalate once if the recovery turn is also missed.
   # No conversation scraping; unresolved records are never silently expired.
-  fm_pending_reply_tick "$STATE" || true
+  # Each record can make remote calls, so the beacon advances between records.
+  fm_pending_reply_tick "$STATE" watcher_beat || true
 
   # Endpoint liveness runs before queue observation: a positively dead or
   # missing secondmate endpoint is relaunched here on a bounded cadence, which
@@ -2769,6 +2794,7 @@ while :; do
     echo "watcher: secondmate wake-loop observation failed" >&2
     exit 1
   }
+  watcher_beat
 
   # Process-to-event liveness repair. This never discovers a result by polling:
   # each registered source has its own child blocking on that source, and this
@@ -2776,6 +2802,7 @@ while :; do
   # whose owner is gone. It is a no-op with nothing registered.
   if [ -d "$STATE/procevent" ]; then
     FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-procevent.sh" reconcile >/dev/null 2>&1 || true
+    watcher_beat
   fi
   # Then deliver any queued-but-unsurfaced result, including one a runner
   # published while this watcher was between cycles.
@@ -2804,6 +2831,7 @@ while :; do
   else
     triage_log "inactive-outcome reconciliation unavailable"
   fi
+  watcher_beat
 
   # Slow per-task checks (firstmate writes these, e.g. a merged-PR poll).
   # Time-based via .last-check mtime so the cadence survives watcher restarts.
@@ -2817,6 +2845,8 @@ while :; do
     contribution_check_output=
     for c in "$STATE"/*.check.sh; do
       [ -e "$c" ] || continue
+      # Each check may take up to CHECK_TIMEOUT; advance the beacon between them.
+      watcher_beat
       is_pr_poll=0
       if [ "$(basename "$c")" = x-watch.check.sh ]; then
         if fmx_poll_shim_valid "$c" "$FM_HOME" "$FM_ROOT" \
@@ -2938,6 +2968,7 @@ EOF
     if [ -n "$contribution_check_output" ]; then
       wake "$contribution_check_output"
     fi
+    watcher_beat
   fi
 
   # On the first changed signal, linger one grace period and re-scan before
@@ -2948,6 +2979,7 @@ EOF
   pending=$(scan_signals)
   if [ -n "$pending" ]; then
     sleep "$SIGNAL_GRACE"
+    watcher_beat
     pending=$(printf '%s\n%s' "$pending" "$(scan_signals)")
     # The final coalesced signal set is the watcher-carried status-change
     # trigger for this home's published summary. Start it before either
@@ -3063,6 +3095,7 @@ EOF
       fi
       triage_log "absorbed benign $reason"
     fi
+    watcher_beat
   fi
 
   # Layer 1 backbone: pane staleness. Two consecutive identical hashes with no busy
@@ -3071,6 +3104,8 @@ EOF
   # remembers the hash already classified, or the declaration a busy pane's
   # crossed turn bound already handed to the away-mode daemon).
   while IFS= read -r w; do
+    # Each window costs a pane capture and possibly crew-state reads.
+    watcher_beat
     kind=$(window_kind "$w")
     task=$(window_to_task "$w" "$STATE")
     # Steering-inbox loss detection runs before the secondmate stale
@@ -3327,6 +3362,8 @@ EOF
   fi
 
   # Terminal wait: a bounded native-event wait for push-capable homes (herdr),
-  # else the blind poll sleep. See event_wait_or_sleep.
+  # else the blind poll sleep. See event_wait_or_sleep. The beacon advances
+  # first, so the wait itself starts from a fresh beat.
+  watcher_beat
   event_wait_or_sleep
 done

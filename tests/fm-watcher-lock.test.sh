@@ -140,6 +140,54 @@ test_singleton_start() {
   pass "simultaneous watcher starts leave exactly one live process"
 }
 
+# A cycle whose bounded steps together outlast the grace is slow, not wedged,
+# so the beacon must advance as each step finishes rather than only at the top
+# of the cycle. Two silent custom checks stand in for those steps: each records
+# the beacon mtime it sees as it starts, then takes two seconds. The second check
+# must see a beacon written after the first one finished; a beacon touched only
+# at the cycle top is no newer than the first check's start.
+test_watcher_beacon_advances_between_slow_cycle_steps() {
+  local dir state fakebin out log id pid i first_start second_mtime
+  dir=$(make_case beacon-advances)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  out="$dir/watch.out"
+  log="$dir/checks.log"
+  for id in a-slow b-slow; do
+    cat > "$state/$id.check.sh" <<SH
+#!/usr/bin/env bash
+beat='$state/.last-watcher-beat'
+if [ "\$(uname)" = Darwin ]; then
+  mtime=\$(/usr/bin/stat -f %m "\$beat")
+else
+  mtime=\$(stat -c %Y "\$beat")
+fi
+printf '%s %s %s\n' '$id' "\$(date +%s)" "\$mtime" >> '$log'
+sleep 2
+SH
+    chmod 0700 "$state/$id.check.sh"
+    FM_STATE_OVERRIDE="$state" "$ROOT/bin/fm-check-register.sh" "$id" >/dev/null \
+      || fail "could not register slow custom check $id"
+  done
+  PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_POLL=5 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=0 FM_HEARTBEAT=999999 "$WATCH" > "$out" 2>&1 &
+  pid=$!
+  i=0
+  while [ "$i" -lt 300 ] && ! grep -q '^b-slow ' "$log" 2>/dev/null; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  first_start=$(awk '$1 == "a-slow" { print $2; exit }' "$log" 2>/dev/null)
+  second_mtime=$(awk '$1 == "b-slow" { print $3; exit }' "$log" 2>/dev/null)
+  [ -n "$first_start" ] && [ -n "$second_mtime" ] \
+    || fail "slow checks did not both run in one cycle: $(cat "$log" 2>/dev/null) $(cat "$out")"
+  [ "$second_mtime" -gt "$first_start" ] \
+    || fail "beacon did not advance after the first slow step (first started $first_start, second saw beacon $second_mtime)"
+  pass "watcher advances its beacon between the slow steps of one cycle"
+}
+
 test_stale_watch_lock_reclaimed() {
   local dir state fakebin out dead_pid pid live lock_pid i
   dir=$(make_case stale-lock)
@@ -1552,6 +1600,7 @@ test_pid_identity_is_locale_invariant
 test_pid_identity_is_terminal_width_invariant
 test_proc_pid_identity_ignores_wall_clock_and_detects_pid_reuse
 test_msys_pid_identity_uses_proc
+test_watcher_beacon_advances_between_slow_cycle_steps
 test_stale_watch_lock_reclaimed
 test_stale_watch_reclaim_publishes_before_clear
 test_live_stale_watch_lock_is_actionable
