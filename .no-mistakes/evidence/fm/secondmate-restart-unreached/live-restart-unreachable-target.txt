@@ -1,0 +1,6 @@
+$ FM_HOME=$LAB FM_SECONDMATE_PERSIST_WAIT=0 bin/fm-secondmate-restart.sh labmate   # target commit 08342441
+unreached: labmate: the request to write down its open work could not be delivered: refusing fleet lifecycle from inside a no-mistakes gate worktree (/Users/oli_mac_mini/.no-mistakes/repos/f35842cdbe15.git); the re-read message was not confirmed delivered either: refusing fleet lifecycle from inside a no-mistakes gate worktree (/Users/oli_mac_mini/.no-mistakes/repos/f35842cdbe15.git)
+summary: 0 of 1 restarted, 0 nudged, 1 unreached
+exit=3
+
+--- persist expectation records:

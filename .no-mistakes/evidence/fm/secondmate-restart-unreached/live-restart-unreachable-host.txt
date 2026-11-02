@@ -1,0 +1,20 @@
+=== commit 08342441 (git checkout outside the gate), lab home with remote mate 'labmate' on host fm-lab-unreachable.invalid (real ssh), no watcher running
+$ FM_HOME=$LAB FM_SECONDMATE_PERSIST_WAIT=0 bin/fm-secondmate-restart.sh labmate
+unreached: labmate: it did not confirm within 0s that its open work is written down, so its conversation was not spent; the request itself was not confirmed delivered: steer to remote secondmate labmate is unconfirmed (transport lost twice; remote completion unknown).; the re-read message was not confirmed delivered either: steer to remote secondmate labmate is unconfirmed (transport lost twice; remote completion unknown).
+summary: 0 of 1 restarted, 0 nudged, 1 unreached
+exit=3
+--- persist expectation records left in $LAB/state/pending-replies:
+$LAB/state/pending-replies/88d21c58052d41b4:request_summary=Firstmate was updated and I am about to r
+$LAB/state/pending-replies/88d21c58052d41b4:phase=delivery_unknown
+$LAB/state/pending-replies/e932ac2a86479558:request_summary=firstmate was updated to the latest - ple
+$LAB/state/pending-replies/e932ac2a86479558:phase=delivery_unknown
+
+=== commit 318aabd9 (git checkout outside the gate), lab home with remote mate 'labmate' on host fm-lab-unreachable.invalid (real ssh), no watcher running
+$ FM_HOME=$LAB FM_SECONDMATE_PERSIST_WAIT=0 bin/fm-secondmate-restart.sh labmate
+unreached: labmate: the request to write down its open work could not be delivered: WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.; the re-read message could not be delivered either: WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+summary: 0 of 1 restarted, 0 nudged, 1 unreached
+exit=3
+--- persist expectation records left in $LAB/state/pending-replies:
+$LAB/state/pending-replies/018fd89bc4a409fd:request_summary=firstmate was updated to the latest - ple
+$LAB/state/pending-replies/018fd89bc4a409fd:phase=delivery_unknown
+
