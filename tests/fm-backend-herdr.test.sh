@@ -4905,6 +4905,33 @@ test_send_text_submit_long_literal_submits_when_composer_holds_every_byte() {
   pass "fm_backend_herdr_send_text_submit: a 1500-character payload a Claude composer still holds is submitted whole"
 }
 
+# A Claude composer repaints typed input asynchronously: mid-turn or on a slow
+# host, the first read after the literal send can show none or only the head of
+# the doorbell. That is a payload still arriving, not a truncation, so it is
+# read again and then submitted rather than cleared and reported send-failed.
+test_send_text_submit_rereads_a_claude_payload_still_rendering() {
+  local dir log resp fb out enter_count text
+  dir="$TMP_ROOT/submit-still-rendering"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  # shellcheck disable=SC2016 # literal $FM_TASK_INBOX is the doorbell wording under test
+  text=': Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your '"'"'sm.inbox'"'"' steering inbox, read and act on each in numeric order, then mv each into its handled/.'
+  printf '{"result":{"agent":{"agent":"claude","agent_status":"idle"}}}\n' > "$resp/1.out"
+  printf '  \xe2\x9d\xaf\n' > "$resp/2.out"
+  printf '  \xe2\x9d\xaf\n' > "$resp/4.out"
+  printf '  \xe2\x9d\xaf %s\n' "${text:0:40}" > "$resp/5.out"
+  printf '  \xe2\x9d\xaf %s\n' "$text" > "$resp/6.out"
+  printf '{"result":{"agent":{"agent_status":"idle"}}}\n' > "$resp/7.out"
+  printf '{"result":{"agent":{"agent_status":"working"}}}\n' > "$resp/9.out"
+  fb=$(make_herdr_fakebin "$dir")
+  out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" FM_BACKEND_HERDR_SUBMIT_POLLS=1 \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_send_text_submit default:w1:p2 "$1" 2 0.01 0.01' "$ROOT" "$text" )
+  [ "$out" = empty ] || fail "a Claude payload that finishes rendering on a later read should be submitted, got '$out'"
+  enter_count=$(grep -c $'\x1f''pane'$'\x1f''send-keys'$'\x1f''w1:p2'$'\x1f''enter' "$log")
+  [ "$enter_count" -eq 1 ] || fail "the rendered payload should be submitted once, sent $enter_count Enter(s)"
+  [ "$(herdr_ctrl_u_count "$log")" -eq 0 ] || fail "a payload still rendering must not be cleared"
+  [ "$(grep -c $'\x1f''pane'$'\x1f''send-text' "$log")" -eq 1 ] || fail "the payload must be typed exactly once"
+  pass "fm_backend_herdr_send_text_submit: a Claude payload still rendering after the settle is re-read and submitted, not cleared"
+}
+
 test_send_text_submit_refuses_enter_when_composer_holds_only_the_suffix() {
   local dir log resp fb out enter_count text suffix
   dir="$TMP_ROOT/submit-long-suffix"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
@@ -6047,6 +6074,7 @@ test_send_text_submit_refuses_enter_when_composer_holds_only_the_suffix
 test_send_text_submit_refused_suffix_that_will_not_clear_is_unknown
 test_send_text_submit_clears_a_wrapped_suffix_one_row_per_press
 test_send_text_submit_refused_suffix_then_clean_retry_submits_only_the_message
+test_send_text_submit_rereads_a_claude_payload_still_rendering
 test_send_text_submit_claude_refuses_to_type_into_a_nonempty_composer
 test_send_text_submit_refuses_suffix_when_transcript_still_shows_the_head
 test_send_text_submit_accepts_marked_payloads_whose_read_back_drops_u2063
