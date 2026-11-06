@@ -390,6 +390,49 @@ test_attached_arm_hands_a_stalled_holder_to_its_replacement() {
   pass "watch-arm: an attached arm hands a holder stalled past the bound to its owner's replacement"
 }
 
+# The turn-end auto-arm is a fresh arm, and it can meet a live holder whose
+# beacon is already past the grace. Every cycle step that can run long now
+# beats or is bounded (bin/fm-watch.sh), so such a holder is wedged, not slow:
+# the arm must never report it as attached, and must report the failure rather
+# than follow it. A stall bound far above the beacon's age keeps the watcher's
+# own eviction out of this case, so the only path left is the refusal.
+test_fresh_arm_never_attaches_to_a_holder_past_the_grace() {
+  local dir state fakebin armout holder identity status beat_epoch out
+  dir=$(make_case fresh-arm-wedged-holder)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  armout="$dir/arm.out"
+  # A live process the lock records under its real identity, which never beats.
+  sleep 300 &
+  holder=$!
+  identity=$(FM_STATE_OVERRIDE="$state" bash -c '. "$1"; fm_pid_identity "$2"' _ "$ROOT/bin/fm-wake-lib.sh" "$holder") \
+    || fail "could not identify the fake holder"
+  mkdir -p "$state/.watch.lock"
+  printf '%s\n' "$holder" > "$state/.watch.lock/pid"
+  printf '%s\n' "$dir" > "$state/.watch.lock/fm-home"
+  printf '%s\n' "$WATCH" > "$state/.watch.lock/watcher-path"
+  printf '%s\n' "$identity" > "$state/.watch.lock/pid-identity"
+  # Past the 5s grace, far under the 600s stall bound.
+  beat_epoch=$(( $(date +%s) - 8 ))
+  TZ=UTC touch -t "$(date -u -r "$beat_epoch" +%Y%m%d%H%M.%S 2>/dev/null || date -u -d "@$beat_epoch" +%Y%m%d%H%M.%S)" \
+    "$state/.last-watcher-beat"
+
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_ARM_ATTACH_POLL=0.1 \
+    FM_ARM_CONFIRM_TIMEOUT=5 FM_GUARD_GRACE=5 FM_WATCHER_STALL_BOUND=600 "$WATCH_ARM" > "$armout" 2>&1 &
+  ARM_PID=$!
+  wait_for_exit "$ARM_PID" 600
+  status=$?
+  out=$(cat "$armout")
+  assert_not_contains "$out" "watcher: attached" "fresh arm reported a holder past the grace as attached"
+  assert_contains "$out" "watcher: FAILED" "fresh arm did not report the holder past the grace as a failure"
+  [ "$status" -ne 0 ] && [ "$status" -ne 124 ] \
+    || fail "the failed arm did not exit nonzero (status $status): $out"
+  is_live_non_zombie "$holder" || fail "the arm signalled a holder still under the stall bound"
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+  pass "watch-arm: a fresh arm never attaches to a live holder past the grace and reports the failure"
+}
+
 test_rearm_resurfaces_durable_queue_and_remote_open_decision() {
   local dir home state fakebin result armout drainout status watcher_pid sequence generation decision_recovery_arm decision_successor
   dir=$(make_case rearm-resurface)
@@ -1594,6 +1637,7 @@ test_reaper_stops_a_tracked_watcher
 test_attached_arm_still_fails_on_a_wake_it_did_not_deliver
 test_attached_arm_follows_a_slow_live_holder
 test_attached_arm_hands_a_stalled_holder_to_its_replacement
+test_fresh_arm_never_attaches_to_a_holder_past_the_grace
 test_rearm_resurfaces_durable_queue_and_remote_open_decision
 test_slow_rearm_recovery_is_still_surfaced
 test_marker_publish_failure_retains_recovery_evidence

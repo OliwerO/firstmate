@@ -612,7 +612,8 @@ test_sweep_noop_with_no_secondmate_meta() {
 
 # make_remote_probe_world <name>: a parent home carrying one remote-route
 # secondmate meta plus a fake ssh that logs every call and answers with
-# FM_FAKE_REMOTE_REPLY on FM_FAKE_REMOTE_RC.
+# FM_FAKE_REMOTE_REPLY on FM_FAKE_REMOTE_RC, or never returns when
+# FM_FAKE_REMOTE_HANG is set.
 make_remote_probe_world() {
   local name=$1 w fakebin
   w="$TMP_ROOT/$name"
@@ -634,6 +635,7 @@ EOF
   cat > "$fakebin/ssh" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${FM_FAKE_SSH_LOG:?}"
+[ -z "${FM_FAKE_REMOTE_HANG:-}" ] || { printf '%s\n' "$$" > "$FM_FAKE_SSH_LOG.hung"; exec sleep 300; }
 [ -z "${FM_FAKE_REMOTE_REPLY:-}" ] || printf '%s\n' "$FM_FAKE_REMOTE_REPLY"
 exit "${FM_FAKE_REMOTE_RC:-0}"
 SH
@@ -642,6 +644,7 @@ SH
 }
 
 # probe_remote <w> <mode> [env...] -> "<status>|<state>|<kill>|<cause>|<where>|<reason>"
+# FM_TEST_PROBE_TIMEOUT, when set, is passed as the probe's remote bound.
 probe_remote() {
   local w=$1 mode=$2; shift 2
   # shellcheck disable=SC2016 # positional params expand in the child shell.
@@ -649,7 +652,7 @@ probe_remote() {
     FM_SSH_BIN="$w/fakebin/ssh" FM_FAKE_SSH_LOG="$w/ssh.log" "$@" \
     bash -c '
       . "$0/bin/fm-secondmate-liveness-lib.sh"
-      fm_secondmate_liveness_probe "$1" rsm1 "$2"
+      fm_secondmate_liveness_probe "$1" rsm1 "$2" "${FM_TEST_PROBE_TIMEOUT:-}"
       printf "%s|%s|%s|%s|%s|%s\n" \
         "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_STATE" "$FM_SM_LIVE_KILL" \
         "$FM_SM_LIVE_CAUSE" "$FM_SM_LIVE_WHERE" "$FM_SM_LIVE_REASON"
@@ -702,6 +705,24 @@ test_remote_poll_probe_unreachable_preserves_route() {
   pass "poll probe: unreachable or inconclusive remote reads preserve the route"
 }
 
+# The watcher passes a remote bound so a hung ssh cannot hold its cycle: the
+# probe ends at the bound as an unknown, preserved route - the same verdict as
+# an unreachable host, never evidence of death - with its ssh process gone.
+test_remote_poll_probe_hung_ssh_is_bounded() {
+  local w out start elapsed hung
+  w=$(make_remote_probe_world probe-hung)
+  start=$(date +%s)
+  out=$(probe_remote "$w" poll FM_FAKE_REMOTE_HANG=1 FM_TEST_PROBE_TIMEOUT=2)
+  elapsed=$(( $(date +%s) - start ))
+  [ "$out" = 'skipped|unknown|0|||remote endpoint state probe exceeded 2s; route preserved on lab-host' ] \
+    || fail "a hung remote probe must end as an unknown, preserved route, got: $out"
+  [ "$elapsed" -lt 60 ] || fail "the bounded probe took ${elapsed}s"
+  hung=$(cat "$w/ssh.log.hung" 2>/dev/null || true)
+  [ -n "$hung" ] || fail "the probe never reached the hanging ssh"
+  ! kill -0 "$hung" 2>/dev/null || { kill "$hung" 2>/dev/null; fail "the hung ssh outlived the probe's bound"; }
+  pass "poll probe: a hung remote read is cut at its bound and preserves the route"
+}
+
 test_tmux_agent_state_classifies
 test_tmux_agent_state_rejects_malformed_targets_before_probe
 test_herdr_agent_state_preserves_husk_classifier
@@ -721,5 +742,6 @@ test_sweep_skips_mate_whose_liveness_lock_is_held
 test_sweep_refuses_relaunch_on_ledger_errors
 test_remote_poll_probe_maps_states
 test_remote_poll_probe_unreachable_preserves_route
+test_remote_poll_probe_hung_ssh_is_bounded
 
 echo "# all fm-secondmate-liveness tests passed"

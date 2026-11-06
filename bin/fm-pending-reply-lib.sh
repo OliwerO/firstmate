@@ -1539,10 +1539,22 @@ _fm_pending_reply_select_needing_work() {  # <record-path>...
 # state, and optional secondmate-home wrong-home path checks. Records are
 # selected in one pass first (_fm_pending_reply_select_needing_work), so a
 # settled record costs no lock and no fork, and the per-record path below runs,
-# unchanged, only for the records that selection returns.
-fm_pending_reply_tick() {  # <state-dir>
-  local state=$1 dir rec corr task_id phase delivered meta backend target label busy sm_home harness remote_host
+# unchanged, only for the records that selection returns. An optional
+# <progress-fn> is called with no arguments before each selected record and
+# once after the last, its status ignored, so a caller that must keep showing
+# liveness (the watcher's beacon) can advance between records that make remote
+# calls. An optional positive <remote-timeout> bounds each remote busy
+# observation through fm_run_timed (bin/fm-timeout-lib.sh, reached through
+# fm-classify-lib.sh), so a hung ssh ends as an `unknown` observation instead
+# of holding the caller; without it the observation is unbounded as before.
+fm_pending_reply_tick() {  # <state-dir> [progress-fn] [remote-timeout]
+  local state=$1 progress=${2-} remote_timeout=${3-} dir rec corr task_id phase delivered meta backend target label busy sm_home harness remote_host
   local observation observation_task found i
+  local -a remote_bound=()
+  case "$remote_timeout" in
+    '' | 0* | *[!0-9]*) ;;
+    *) remote_bound=(fm_run_timed "$remote_timeout") ;;
+  esac
   local -a observation_tasks=() observation_values=() records=() selected=()
   dir=$(fm_pending_reply_dir "$state")
   [ -d "$dir" ] || return 0
@@ -1562,6 +1574,7 @@ fm_pending_reply_tick() {  # <state-dir>
     selected+=("$rec")
   done < <(_fm_pending_reply_select_needing_work ${records[@]+"${records[@]}"})
   for rec in ${selected[@]+"${selected[@]}"}; do
+    [ -z "$progress" ] || "$progress" || true
     corr=$(fm_pending_reply_get "$rec" corr_id)
     [ -n "$corr" ] || corr=$(basename "$rec")
     task_id=$(fm_pending_reply_get "$rec" task_id)
@@ -1647,7 +1660,7 @@ fm_pending_reply_tick() {  # <state-dir>
         done
         if [ "$found" = 0 ]; then
           if [ -n "$remote_host" ]; then
-            observation=$("$_FM_PENDING_REPLY_LIB_DIR/fm-on.sh" "$task_id" \
+            observation=$(${remote_bound[@]+"${remote_bound[@]}"} "$_FM_PENDING_REPLY_LIB_DIR/fm-on.sh" "$task_id" \
               fm-remote-secondmate-control.sh observe "$task_id" < /dev/null 2>/dev/null || printf 'unknown')
             case "$observation" in busy|idle|fallback-idle|unknown) ;; *) observation=unknown ;; esac
           else
@@ -1661,6 +1674,7 @@ fm_pending_reply_tick() {  # <state-dir>
     fi
     fm_pending_reply_tick_one "$state" "$corr" "$busy" "$sm_home" || true
   done
+  [ -z "$progress" ] || "$progress" || true
   return 0
 }
 

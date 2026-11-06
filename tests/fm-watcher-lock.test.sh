@@ -140,6 +140,125 @@ test_singleton_start() {
   pass "simultaneous watcher starts leave exactly one live process"
 }
 
+# A cycle whose bounded steps together outlast the grace is slow, not wedged,
+# so the beacon must advance as each step finishes rather than only at the top
+# of the cycle. Two silent custom checks stand in for those steps: each records
+# the beacon mtime it sees as it starts, then takes two seconds. The second check
+# must see a beacon written after the first one finished; a beacon touched only
+# at the cycle top is no newer than the first check's start.
+test_watcher_beacon_advances_between_slow_cycle_steps() {
+  local dir state fakebin out log id pid i first_start second_mtime
+  dir=$(make_case beacon-advances)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  out="$dir/watch.out"
+  log="$dir/checks.log"
+  for id in a-slow b-slow; do
+    cat > "$state/$id.check.sh" <<SH
+#!/usr/bin/env bash
+beat='$state/.last-watcher-beat'
+if [ "\$(uname)" = Darwin ]; then
+  mtime=\$(/usr/bin/stat -f %m "\$beat")
+else
+  mtime=\$(stat -c %Y "\$beat")
+fi
+printf '%s %s %s\n' '$id' "\$(date +%s)" "\$mtime" >> '$log'
+sleep 2
+SH
+    chmod 0700 "$state/$id.check.sh"
+    FM_STATE_OVERRIDE="$state" "$ROOT/bin/fm-check-register.sh" "$id" >/dev/null \
+      || fail "could not register slow custom check $id"
+  done
+  PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_POLL=5 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=0 FM_HEARTBEAT=999999 "$WATCH" > "$out" 2>&1 &
+  pid=$!
+  i=0
+  while [ "$i" -lt 300 ] && ! grep -q '^b-slow ' "$log" 2>/dev/null; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  first_start=$(awk '$1 == "a-slow" { print $2; exit }' "$log" 2>/dev/null)
+  second_mtime=$(awk '$1 == "b-slow" { print $3; exit }' "$log" 2>/dev/null)
+  [ -n "$first_start" ] && [ -n "$second_mtime" ] \
+    || fail "slow checks did not both run in one cycle: $(cat "$log" 2>/dev/null) $(cat "$out")"
+  [ "$second_mtime" -gt "$first_start" ] \
+    || fail "beacon did not advance after the first slow step (first started $first_start, second saw beacon $second_mtime)"
+  pass "watcher advances its beacon between the slow steps of one cycle"
+}
+
+# A step that hangs, rather than one that is merely slow, must not freeze the
+# beacon either. The watcher's remote liveness probe runs through fm-on.sh, and
+# a fake ssh that never returns stands in for a hung connection: the probe must
+# be cut at FM_WATCH_REMOTE_CALL_TIMEOUT (its process group gone) and the loop
+# must beat after it while the watcher keeps the lock. Unbounded, the watcher
+# sits in that one probe with its beacon frozen.
+test_watcher_beacon_advances_past_a_hung_remote_step() {
+  local dir state fakebin out sshlog pid i started sleeper beat_mtime
+  dir=$(make_case hung-remote-step)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  out="$dir/watch.out"
+  sshlog="$dir/ssh.log"
+  mkdir -p "$dir/data"
+  cat > "$state/rsm1.meta" <<EOF
+window=remote:rsm1
+kind=secondmate
+harness=claude
+remote_host=lab-host
+remote_backend=herdr
+remote_herdr_session=fm-remote
+remote_target=fm-remote:w1:p1
+home=/remote/rsm1-home
+EOF
+  cat > "$dir/data/secondmates.md" <<EOF
+- rsm1 - Remote mate (host: lab-host; root: /remote/root; home: /remote/rsm1-home; scope: remote work; projects: alpha; added 2026-01-01)
+EOF
+  cat > "$fakebin/ssh" <<SH
+#!/usr/bin/env bash
+printf '%s %s\\n' "\$\$" "\$(date +%s)" >> '$sshlog'
+exec sleep 300
+SH
+  chmod +x "$fakebin/ssh"
+  # fm-on.sh only runs a command tracked in its code root, so this watcher gets
+  # the real checkout instead of the suite's inert tangle root.
+  PATH="$fakebin:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" \
+    FM_DATA_OVERRIDE="$dir/data" FM_SSH_BIN="$fakebin/ssh" \
+    FM_WATCH_REMOTE_CALL_TIMEOUT=2 FM_SECONDMATE_LIVENESS_SECS=1 \
+    FM_POLL=5 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" 2>&1 &
+  pid=$!
+  i=0
+  while [ "$i" -lt 300 ] && [ ! -s "$sshlog" ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  read -r sleeper started < "$sshlog" 2>/dev/null || true
+  [ -n "${started:-}" ] || { kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; fail "the remote liveness probe never reached ssh: $(cat "$out")"; }
+  beat_mtime=0
+  i=0
+  while [ "$i" -lt 300 ]; do
+    if [ "$(uname)" = Darwin ]; then
+      beat_mtime=$(/usr/bin/stat -f %m "$state/.last-watcher-beat" 2>/dev/null || echo 0)
+    else
+      beat_mtime=$(stat -c %Y "$state/.last-watcher-beat" 2>/dev/null || echo 0)
+    fi
+    [ "$beat_mtime" -gt "$started" ] && break
+    sleep 0.1
+    i=$((i + 1))
+  done
+  is_live_non_zombie "$pid" || fail "the watcher exited instead of riding out the hung step: $(cat "$out")"
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  if kill -0 "$sleeper" 2>/dev/null; then
+    kill "$sleeper" 2>/dev/null || true
+    fail "the hung remote probe was not cut at its bound (fake ssh pid $sleeper still running)"
+  fi
+  [ "$beat_mtime" -gt "$started" ] \
+    || fail "beacon did not advance after the hung remote step (ssh started $started, beacon $beat_mtime)"
+  pass "watcher cuts a hung remote step at its bound and beats again"
+}
+
 test_stale_watch_lock_reclaimed() {
   local dir state fakebin out dead_pid pid live lock_pid i
   dir=$(make_case stale-lock)
@@ -1552,6 +1671,8 @@ test_pid_identity_is_locale_invariant
 test_pid_identity_is_terminal_width_invariant
 test_proc_pid_identity_ignores_wall_clock_and_detects_pid_reuse
 test_msys_pid_identity_uses_proc
+test_watcher_beacon_advances_between_slow_cycle_steps
+test_watcher_beacon_advances_past_a_hung_remote_step
 test_stale_watch_lock_reclaimed
 test_stale_watch_reclaim_publishes_before_clear
 test_live_stale_watch_lock_is_actionable
