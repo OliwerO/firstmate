@@ -147,6 +147,9 @@ printf '%s\n' "$*" >> "${QUOTA_AXI_CALLS:?}"
 [ "${FAKE_QUOTA_FAIL:-0}" = 1 ] && exit 1
 [ "${1:-}" = --json ] || exit 2
 cat "${QUOTA_AXI_FIXTURE:?}"
+# A real quota-axi exits non-zero while still writing a complete snapshot when
+# a provider it polled reports auth_required; FAKE_QUOTA_RC reproduces that.
+exit "${FAKE_QUOTA_RC:-0}"
 SH
 chmod +x "$FAKEBIN/quota-axi"
 
@@ -879,6 +882,31 @@ expect_code 0 "$code" "quota-axi failure exits 0"
 assert_contains "$out" '  status: error' "quota-axi failure is an error outcome"
 assert_contains "$out" '  reason: quota-axi --json failed' "quota-axi failure is named"
 pass "quota evidence comes from one quota-axi --json read, and its failure is an error outcome"
+
+# --- a usable snapshot is kept whatever quota-axi exited ------------------------
+# quota-axi exits 1 while still writing a complete, schema-valid snapshot when a
+# provider it polled reports auth_required. Missing authentication is disclosed
+# uncertainty that keeps a candidate eligible (AGENTS.md section 4), so the
+# snapshot is judged by fm_quota_json_valid, never by the exit code.
+reset_log
+write_response "$RESPONSE" rule_4 0.9
+TYPESAFE_API_KEY=$KEY FAKE_QUOTA_RC=1 run code out err "$BRIEF"
+expect_code 0 "$code" "a non-zero quota-axi with a usable snapshot exits 0"
+assert_contains "$out" '  status: clear' "a valid snapshot resolves whatever quota-axi exited"
+assert_contains "$out" "  profile: --harness 'cursor' --model 'cursor-grok-4.6-medium'" "the argmax still runs on that snapshot"
+assert_contains "$out" 'candidate: kimi:kimi-code/k3  provider=kimi  -> eligible, unranked: provider kimi unmeasured (unknown): disclosed uncertainty' "an unmeasured provider stays an eligible unranked candidate, not a failure"
+assert_not_contains "$out" 'quota-axi --json failed' "a usable snapshot is never reported as a quota-axi failure"
+reset_log
+BAD_QUOTA="$TMP_ROOT/quota-truncated.json"
+printf '{"schemaVersion": 5, "providers":' > "$BAD_QUOTA"
+TYPESAFE_API_KEY=$KEY FAKE_QUOTA_RC=1 QUOTA_AXI_FIXTURE="$BAD_QUOTA" run code out err "$BRIEF"
+expect_code 0 "$code" "a non-zero quota-axi with an unusable payload exits 0"
+assert_contains "$out" '  status: error' "an unusable payload is still an error outcome"
+assert_contains "$out" '  reason: quota-axi --json failed' "a non-zero exit with an unusable payload is named as the failure it was"
+reset_log
+TYPESAFE_API_KEY=$KEY QUOTA_AXI_FIXTURE="$BAD_QUOTA" run code out err "$BRIEF"
+assert_contains "$out" '  reason: quota-axi --json returned an invalid snapshot' "a clean exit with an unusable payload is named as an invalid snapshot"
+pass "the snapshot is judged on its own contents, so an auth_required provider never kills the resolution"
 
 # --- API and response failures are error outcomes, exit 0 ----------------------
 reset_log
