@@ -9,7 +9,7 @@
 # This is bin/fm-dispatch-resolve.sh's classifier with the options left open.
 # Dispatch resolution is one Choice question whose options are the configured
 # rules; triage is one Choice question whose options are the canonical triage
-# labels. Both are the same operation, so both use the one call path in
+# labels. Both are the same operation; this tool reaches TypeSafe through
 # bin/fm-jev-lib.sh. This tool stops at the answer: it publishes each
 # question's choice, confidence, and full probabilities, and says whether the
 # answer cleared the floor. It never applies a label, edits an issue, or
