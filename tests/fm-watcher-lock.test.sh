@@ -182,7 +182,7 @@ SH
     FM_STATE_OVERRIDE="$state" "$ROOT/bin/fm-check-register.sh" "$id" >/dev/null \
       || fail "could not register slow custom check $id"
   done
-  PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_POLL=5 FM_SIGNAL_GRACE=1 \
+  PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_POLL=5 FM_SIGNAL_GRACE=1 FM_WATCH_BEAT_STEP_SECS=1 \
     FM_CHECK_INTERVAL=0 FM_HEARTBEAT=999999 "$WATCH" > "$out" 2>&1 &
   pid=$!
   i=0
@@ -238,7 +238,7 @@ SH
   # the real checkout instead of the suite's inert tangle root.
   PATH="$fakebin:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" \
     FM_DATA_OVERRIDE="$dir/data" FM_SSH_BIN="$fakebin/ssh" \
-    FM_WATCH_REMOTE_CALL_TIMEOUT=2 FM_SECONDMATE_LIVENESS_SECS=1 \
+    FM_WATCH_REMOTE_CALL_TIMEOUT=2 FM_SECONDMATE_LIVENESS_SECS=1 FM_WATCH_BEAT_STEP_SECS=1 \
     FM_POLL=5 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" 2>&1 &
   pid=$!
   i=0

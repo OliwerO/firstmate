@@ -337,10 +337,11 @@ fi
 # turn-ended signature, annotation staleness checks, and guarded bookkeeping writes.
 
 POLL=${FM_POLL:-15}                   # seconds between cycles
-# The liveness beacon is touched at the top of each cycle, after each bounded
-# step of its synchronous work, and immediately before the terminal wait below
-# (event_wait_or_sleep; see watcher_beat), so a healthy cycle's beacon can
-# legitimately age up to POLL seconds, or one step's duration, between touches.
+# The liveness beacon is touched at the top of each cycle and, once the cycle has
+# run BEAT_STEP_SECS since its last touch, after each bounded step of its
+# synchronous work and before the terminal wait below (event_wait_or_sleep; see
+# watcher_beat), so a healthy cycle's beacon can legitimately age up to POLL
+# seconds, or BEAT_STEP_SECS plus one step's duration, between touches.
 # fm_poll_derived_grace (bin/fm-wake-lib.sh, already sourced
 # transitively above) is the single owner of the max(300, poll+60)
 # derivation - see docs/turnend-guard.md "Guard grace and the poll cadence".
@@ -458,6 +459,13 @@ REMOTE_CALL_TIMEOUT=${FM_WATCH_REMOTE_CALL_TIMEOUT:-}
 case "$REMOTE_CALL_TIMEOUT" in ''|*[!0-9]*|0*) REMOTE_CALL_TIMEOUT=60 ;; esac
 RECONCILE_TIMEOUT=${FM_WATCH_RECONCILE_TIMEOUT:-}
 case "$RECONCILE_TIMEOUT" in ''|*[!0-9]*|0*) RECONCILE_TIMEOUT=240 ;; esac
+# A step beat (watcher_beat without "now") advances the beacon only once this
+# many seconds have passed since the last beat, so a fast cycle beats exactly
+# once at its top and the beacon's change still marks one completed cycle;
+# only a cycle slow enough to near the guard grace beats between its steps.
+# 30 plus the longest step bound (RECONCILE_TIMEOUT) stays under the 300s grace.
+BEAT_STEP_SECS=${FM_WATCH_BEAT_STEP_SECS:-}
+case "$BEAT_STEP_SECS" in ''|*[!0-9]*|0*) BEAT_STEP_SECS=30 ;; esac
 # Relaunch bound: at most this many automatic attempts per window per mate,
 # counted from the durable attempt ledger the shared library appends to. A mate
 # that keeps dying past the bound wakes once and is parked until a probe reads
@@ -3863,13 +3871,21 @@ resurface_after_downtime() {
 # on a loaded host still reads as live, while one wedged step stops the beacon
 # and reaches the stall bound. A lock naming another watcher leaves the beacon
 # to that watcher; the self-eviction test at the next cycle top owns standing
-# down. The builtin read and truncating redirect cost no fork; every reader
+# down. The cycle top passes "now" and always beats; every other call is a step
+# beat that is skipped until BEAT_STEP_SECS have passed since the last beat.
+# The builtin read, $SECONDS, and truncating redirect cost no fork; every reader
 # uses only the beacon's mtime.
-watcher_beat() {
+WATCHER_BEAT_AT=
+watcher_beat() {  # [now]
   local holder=
+  if [ "${1-}" != now ] && [ -n "$WATCHER_BEAT_AT" ] \
+    && [ $((SECONDS - WATCHER_BEAT_AT)) -lt "$BEAT_STEP_SECS" ]; then
+    return 0
+  fi
   { IFS= read -r holder < "$WATCH_LOCK/pid"; } 2>/dev/null || [ -n "$holder" ] || return 0
   [ "$holder" = "$WATCHER_PID" ] || return 0
-  { : > "$BEAT"; } 2>/dev/null || true
+  { : > "$BEAT"; } 2>/dev/null && WATCHER_BEAT_AT=$SECONDS
+  return 0
 }
 
 while :; do
@@ -3923,8 +3939,9 @@ while :; do
 
   # Liveness beacon for fm-guard.sh: a fresh mtime here means a watcher is
   # alive. Supervision scripts warn when this goes stale with tasks in flight.
-  # The steps below advance it again as they finish (watcher_beat).
-  watcher_beat
+  # The steps below advance it again as they finish once the cycle runs long
+  # (watcher_beat).
+  watcher_beat now
 
   # Opt-in fleet activity ledger (docs/fleet-ledger.md): pick up newly appended
   # status lines before this cycle can exit on a wake. Off costs one file test.
@@ -4594,8 +4611,8 @@ EOF
   fi
 
   # Terminal wait: a bounded native-event wait for push-capable homes (herdr, rex),
-  # else the blind poll sleep. See event_wait_or_sleep. The beacon advances
-  # first, so the wait itself starts from a fresh beat.
+  # else the blind poll sleep. See event_wait_or_sleep. A long cycle's beacon
+  # advances first, so the wait itself starts from a fresh beat.
   watcher_beat
   event_wait_or_sleep
 done
