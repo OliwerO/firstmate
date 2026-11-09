@@ -5697,13 +5697,18 @@ test_send_text_submit_claude_2_1_291_marked_popup_row_is_proven_and_submitted() 
 # remainder, or only a prefix of the payload is still refused and cleared while
 # the same popup is on screen.
 test_send_text_submit_claude_2_1_291_popup_still_refuses_a_partial_payload() {
-  local dir log resp fb out enter_count name capture text composer
-  while IFS='|' read -r name capture text composer; do
+  local dir log resp fb out enter_count name capture text composer reads n
+  # <reads> is how many composer reads the adapter takes before refusing: a
+  # leading part of the payload is re-read up to <retries> (3) more times, so
+  # every one of those reads still shows the same partial composer.
+  while IFS='|' read -r name capture text composer reads; do
     dir="$TMP_ROOT/submit-claude-2-1-291-popup-refuse-$name"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
     herdr_submit_claude_prefix "$resp" "$text"
-    herdr_popup_capture_with_composer "$capture" "$composer" > "$resp/4.out"
-    printf '  \xe2\x9d\xaf\n' > "$resp/6.out"
-    printf '{"result":{"agent":{"agent_status":"working"}}}\n' > "$resp/7.out"
+    for ((n = 4; n < 4 + reads; n++)); do
+      herdr_popup_capture_with_composer "$capture" "$composer" > "$resp/$n.out"
+    done
+    printf '  \xe2\x9d\xaf\n' > "$resp/$((5 + reads)).out"
+    printf '{"result":{"agent":{"agent_status":"working"}}}\n' > "$resp/$((6 + reads)).out"
     fb=$(make_herdr_fakebin "$dir")
     out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" FM_BACKEND_HERDR_SUBMIT_POLLS=1 \
       bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_send_text_submit default:w1:p2 "$1" 3 0.01 0.01' "$ROOT" "$text" )
@@ -5712,10 +5717,10 @@ test_send_text_submit_claude_2_1_291_popup_still_refuses_a_partial_payload() {
     [ "$enter_count" -eq 0 ] || fail "$name: a partial payload must not be submitted, sent $enter_count Enter(s)"
     [ "$(herdr_ctrl_u_count "$log")" -eq 1 ] || fail "$name: the refused partial payload should be cleared with one Ctrl+U"
   done <<'EOF'
-suffix|no-mistakes-typed|/no-mistakes|mistakes
-placeholder-remainder|no-mistakes-typed|/no-mistakes|[Pasted text #1] mistakes
-prefix|no-mistakes-typed|/no-mistakes now|/no-mistakes
-popup-suffix|exit-typed|/exit|xit
+suffix|no-mistakes-typed|/no-mistakes|mistakes|1
+placeholder-remainder|no-mistakes-typed|/no-mistakes|[Pasted text #1] mistakes|1
+prefix|no-mistakes-typed|/no-mistakes now|/no-mistakes|4
+popup-suffix|exit-typed|/exit|xit|1
 EOF
   pass "fm_backend_herdr_send_text_submit: with Claude 2.1.291's popup on screen a suffix, a placeholder plus remainder, or a prefix is still refused and cleared"
 }
