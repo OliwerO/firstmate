@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# fm-jev-lib.sh - the one typesafe.ai (Jev) System One call path firstmate owns.
+# fm-jev-lib.sh - the typesafe.ai (Jev) System One call path of bin/fm-classify-jev.sh.
 #
 # Source it from a consumer:
 #   # shellcheck source=bin/fm-jev-lib.sh
 #   . "$SCRIPT_DIR/fm-jev-lib.sh"
 #
-# It owns what every System One caller must do identically: the opt-in key
-# lookup, the POST that keeps the key off argv, the never-send guard, and the
-# Choice-answer validation. bin/fm-dispatch-resolve.sh (one rule question) and
-# bin/fm-classify-jev.sh (any declared question set) are its consumers;
+# It owns the classifier's opt-in key lookup, the POST that keeps the key off
+# argv, the never-send guard, and the Choice-answer validation.
+# bin/fm-dispatch-resolve.sh keeps its own multi-provider call path;
 # docs/configuration.md "Typed dispatch resolution" owns the operator contract
-# both of them publish.
+# both tools publish.
 #
 # Key handling, which every consumer must preserve:
 #   The key lives in one non-exported shell variable and reaches curl as a
@@ -23,6 +22,9 @@
 #
 # Requires bin/fm-env-lib.sh (fmx_env_get) and bin/fm-timing-lib.sh
 # (fm_timing_now_ms) to be sourced by the consumer first.
+
+# The FM_JEV_* settings and outputs are read by the sourcing tool, not here.
+# shellcheck disable=SC2034
 
 # Fixed settings shared by every consumer.
 FM_JEV_MODEL=jev-latest
